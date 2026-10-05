@@ -1,0 +1,23 @@
+--- a/packages/SystemUI/src/com/android/systemui/statusbar/LightRevealScrim.kt
++++ b/packages/SystemUI/src/com/android/systemui/statusbar/LightRevealScrim.kt
+@@ -53,7 +53,9 @@
+ /** Uniform fade for the GTOS Home-to-analog-AOD handoff. */
+ object GtosAnalogFadeReveal : LightRevealEffect {
+     override fun setRevealAmountOnScrim(amount: Float, scrim: LightRevealScrim) {
+-        scrim.startColorAlpha = 1f - Interpolators.FAST_OUT_SLOW_IN.getInterpolation(amount)
++        val progress = Interpolators.FAST_OUT_SLOW_IN.getInterpolation(amount)
++        scrim.interpolatedRevealAmount = progress
++        scrim.startColorAlpha = 1f - progress
+         scrim.revealGradientEndColorAlpha = 0f
+         scrim.setRevealGradientBounds(0f, 0f, scrim.width.toFloat(), scrim.height.toFloat())
+     }
+@@ -346,6 +348,9 @@
+     var revealEffect: LightRevealEffect = LiftReveal
+         set(value) {
+             if (field != value) {
++                // Another native reveal effect may not write the fill alpha. Clear our
++                // uniform fade when waking or switching to a fingerprint/other reveal.
++                if (field === GtosAnalogFadeReveal) startColorAlpha = 0f
+                 field = value
+ 
+                 revealEffect.setRevealAmountOnScrim(revealAmount, this)

@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <permission android:name="dev.gtos.launcher.permission.UPDATE_SKY" android:protectionLevel="normal" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Scoped package visibility; no broad QUERY_ALL_PACKAGES permission. -->
+    <queries>
+        <package android:name="com.android.systemui" />
+        <intent><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+    <application
+        android:name=".GTApplication"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.GTOS">
+        <provider android:name=".design.SkyStateProvider"
+            android:authorities="dev.gtos.launcher.sky-state"
+            android:exported="true" android:readPermission="android.permission.STATUS_BAR" />
+        <receiver android:name=".design.SkyUpdateReceiver" android:exported="true"
+            android:permission="dev.gtos.launcher.permission.UPDATE_SKY" />
+        <service android:name=".design.SkyWallpaperService"
+            android:exported="true" android:permission="android.permission.BIND_WALLPAPER">
+            <intent-filter><action android:name="android.service.wallpaper.WallpaperService" /></intent-filter>
+            <meta-data android:name="android.service.wallpaper" android:resource="@xml/sky_wallpaper" />
+        </service>
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:clearTaskOnLaunch="true"
+            android:stateNotNeeded="true"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

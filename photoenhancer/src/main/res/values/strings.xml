@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">Horizon Photo Enhance</string>
+    <string name="automatic">Automatically enhance Camera photos</string>
+    <string name="choose_photo">Enhance an existing photo</string>
+    <string name="advanced">AI Reconstruct · stronger restoration</string>
+    <string name="reconstruction_note">Rebuilds finer-looking detail and upscales small images to at least 1080 pixels on the shorter side. Processing takes longer. Details are AI-estimated and can differ from reality. Full-resolution originals stay intact. Turn this off for gentler processing.</string>
+</resources>

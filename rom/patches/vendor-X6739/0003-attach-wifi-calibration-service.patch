@@ -1,0 +1,10 @@
+--- a/Android.bp
++++ b/Android.bp
+@@ -26244,6 +26244,7 @@
+ cc_prebuilt_binary {
+     name: "wlan_assistant",
+     owner: "infinix",
++    init_rc: ["proprietary/vendor/etc/init/wlan_assistant.rc"],
+     target: {
+         android_arm64: {
+             srcs: [

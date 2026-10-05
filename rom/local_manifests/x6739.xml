@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Candidate manifest: compile and hardware validation remain pending. -->
+<manifest>
+  <remote name="gtos-github" fetch="https://github.com/" />
+  <project name="vlxlxlv/android_device_infinix_X6739" path="device/infinix/X6739" remote="gtos-github" revision="63a3793ec9ebdddce6b4d6f0109fea5bb1243d84" />
+  <project name="vlxlxlv/android_vendor_infinix_X6739" path="vendor/infinix/X6739" remote="gtos-github" revision="5f7b23f38d5f5afd4b8f1e231289c95be90686d1" />
+  <project name="vlxlxlv/android_device_infinix_X6739-kernel" path="device/infinix/X6739-kernel" remote="gtos-github" revision="3844b0e676a33d2b4180cd9b3e6c595da82b84d1" />
+  <project name="vlxlxlv/android_hardware_transsion" path="hardware/transsion" remote="gtos-github" revision="37fdba0956b811ebf970a5b487c41f9d4b6d3576" />
+  <project name="LineageOS/android_hardware_mediatek" path="hardware/mediatek" remote="gtos-github" revision="68f9be72a32bca66e7c63d69e9739b18f13c8b48" />
+  <project name="techyminati/android_vendor_mediatek_ims" path="vendor/mediatek/ims" remote="gtos-github" revision="e9cab87f806ab010346dd61cab3dc4fd6051aa59" />
+  <project name="LineageOS/android_device_mediatek_sepolicy_vndr" path="device/mediatek/sepolicy_vndr" remote="gtos-github" revision="1b12039600b2ad9b1a435682bc8f61fd1f0b111d" />
+  <project name="MillenniumOSS/android_vendor_sony_dolby" path="vendor/sony/dolby" remote="gtos-github" revision="75869066b02aabbec2c62f4c898fa29285e93f53" />
+</manifest>

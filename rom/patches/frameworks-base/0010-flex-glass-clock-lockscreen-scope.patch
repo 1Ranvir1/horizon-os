@@ -1,0 +1,165 @@
+--- a/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/FlexClockTextView.kt
++++ b/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/FlexClockTextView.kt
+@@ -31,6 +31,22 @@
+     isLargeClock: Boolean,
+     attrs: AttributeSet? = null,
+ ) : DigitalClockTextView(clockCtx, isLargeClock, attrs) {
++    private val glassClock = GtosGlassClockPainter(context)
++
++    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
++        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
++        if (glassClock.enabled && !isLargeClock && dozeFraction == 0f) {
++            setMeasuredDimension((resources.displayMetrics.widthPixels * .86f).toInt(),
++                kotlin.math.max(measuredHeight, (resources.displayMetrics.heightPixels * .20f).toInt()))
++        }
++    }
++
++    override fun onDraw(canvas: android.graphics.Canvas) {
++        if (glassClock.enabled && !isLargeClock && dozeFraction == 0f) {
++            glassClock.draw(canvas, text.toString(), width, height)
++        } else super.onDraw(canvas)
++    }
++
+     private val isLegacyFlex: Boolean
+         get() = clockCtx.settings.clockId == FLEX_CLOCK_ID
+ 
+--- a/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/FlexClockViewGroup.kt
++++ b/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/FlexClockViewGroup.kt
+@@ -86,6 +86,8 @@
+                     .also { _childViews = it }
+         }
+ 
++    private val glassClock = GtosGlassClockPainter(context)
++
+     private var maxChildSize = VPointF(-1f)
+     private val lockscreenTranslate = VPointF.ZERO
+     private var aodTranslate = VPointF.ZERO
+@@ -136,7 +138,11 @@
+ 
+         val xScale = if (childViews.size < 4) 1f else 2f
+         val yBuffer = context.resources.getDimensionPixelSize(R.dimen.clock_vertical_digit_buffer)
+-        return (maxChildSize + aodTranslate.abs()) * VPointF(xScale, 2f) + VPointF(0f, yBuffer)
++        val nativeSize = (maxChildSize + aodTranslate.abs()) * VPointF(xScale, 2f) + VPointF(0f, yBuffer)
++        return if (glassClock.enabled && dozeFraction == 0f)
++            VPointF(resources.displayMetrics.widthPixels * .88f,
++                kotlin.math.max(nativeSize.y, resources.displayMetrics.heightPixels * .24f))
++            else nativeSize
+     }
+ 
+     override fun onViewAdded(child: View?) {
+@@ -292,6 +298,17 @@
+ 
+     override fun onDraw(canvas: Canvas) {
+         logger.onDraw()
++        if (glassClock.enabled && dozeFraction == 0f) {
++            fun digit(id: Int) = childViews.firstOrNull { it.id == id }?.text?.toString().orEmpty()
++            val hours = digit(ClockViewIds.HOUR_DIGIT_PAIR).ifEmpty {
++                digit(ClockViewIds.HOUR_FIRST_DIGIT) + digit(ClockViewIds.HOUR_SECOND_DIGIT)
++            }
++            val minutes = digit(ClockViewIds.MINUTE_DIGIT_PAIR).ifEmpty {
++                digit(ClockViewIds.MINUTE_FIRST_DIGIT) + digit(ClockViewIds.MINUTE_SECOND_DIGIT)
++            }
++            glassClock.draw(canvas, "$hours:$minutes", width, height)
++            return
++        }
+         childViews.forEach { child ->
+             canvas.use { canvas ->
+                 canvas.translate(digitOffsets.getOrDefault(child.id, 0f), 0f)
+--- a/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/KeyguardRootView.kt
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/KeyguardRootView.kt
+@@ -46,7 +46,9 @@
+         for (i in 0 until group.childCount) {
+             val child = group.getChildAt(i)
+             if (!child.isShown) continue
+-            val candidate = if (child is com.android.systemui.shared.clocks.AnimatableClockView) child
++            val candidate = if (child is com.android.systemui.shared.clocks.AnimatableClockView
++                || child is com.android.systemui.shared.clocks.view.FlexClockTextView
++                || child is com.android.systemui.shared.clocks.view.FlexClockViewGroup) child
+                 else if (child is android.view.ViewGroup) findClock(child) else null
+             if (candidate != null && candidate.width * candidate.height > (largest?.let { it.width * it.height } ?: 0)) largest = candidate
+         }
+--- a/packages/SystemUI/src/com/android/systemui/statusbar/notification/row/NotificationBackgroundView.java
++++ b/packages/SystemUI/src/com/android/systemui/statusbar/notification/row/NotificationBackgroundView.java
+@@ -137,7 +137,8 @@
+             if (mBackground != null) {
+                 mBackground.setBounds(backgroundBounds);
+                 int previousAlpha = mBackground.getAlpha();
+-                if (getResources().getBoolean(com.android.systemui.res.R.bool.config_gtosGlassControls)) {
++                if (getResources().getBoolean(com.android.systemui.res.R.bool.config_gtosGlassControls)
++                    && getParent() instanceof ExpandableNotificationRow row && row.isOnKeyguard()) {
+                     mBackground.setAlpha(Math.round(previousAlpha * 0.46f));
+                 }
+                 mBackground.draw(canvas);
+@@ -240,7 +241,8 @@
+             }
+             drawable.setBounds(left, top, right, bottom);
+             int previousAlpha = drawable.getAlpha();
+-            if (getResources().getBoolean(com.android.systemui.res.R.bool.config_gtosGlassControls)) {
++            if (getResources().getBoolean(com.android.systemui.res.R.bool.config_gtosGlassControls)
++                    && getParent() instanceof ExpandableNotificationRow row && row.isOnKeyguard()) {
+                 drawable.setAlpha(Math.round(previousAlpha * 0.46f));
+             }
+             drawable.draw(canvas);
+--- a/packages/SystemUI/src/com/android/systemui/statusbar/phone/ScrimController.java
++++ b/packages/SystemUI/src/com/android/systemui/statusbar/phone/ScrimController.java
+@@ -1171,7 +1171,7 @@
+ 
+         // Device opt-in glass shade; authentication/AOD/blanking states retain their rules.
+         if (mScrimBehind.getResources().getBoolean(R.bool.config_gtosGlassControls)
+-                && (mState == ScrimState.UNLOCKED || mState == ScrimState.SHADE_LOCKED)
++                && mState == ScrimState.SHADE_LOCKED
+                 && mPanelExpansionFraction > 0 && !mKeyguardOccluded) {
+             mBehindAlpha = Math.min(mBehindAlpha, 0.56f);
+             mNotificationsAlpha = Math.min(mNotificationsAlpha, 0.20f);
+diff --git a/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/GtosGlassClockPainter.kt b/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/GtosGlassClockPainter.kt
+new file mode 100644
+index 000000000..dac84773e
+--- /dev/null
++++ b/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/GtosGlassClockPainter.kt
+@@ -0,0 +1,46 @@
++package com.android.systemui.shared.clocks.view
++
++import android.content.Context
++import android.graphics.Canvas
++import android.graphics.Color
++import android.graphics.LinearGradient
++import android.graphics.Paint
++import android.graphics.Shader
++import android.graphics.Typeface
++
++/** Paint treatment only. Native clock views retain their time and accessibility. */
++internal class GtosGlassClockPainter(context: Context) {
++    val enabled: Boolean = context.resources.getIdentifier("config_gtosGlassControls", "bool", context.packageName).let {
++        it != 0 && context.resources.getBoolean(it)
++    }
++    private val ctx = context
++    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
++        typeface = Typeface.create(Typeface.create("sans-serif-condensed", Typeface.NORMAL), 200, false)
++        textAlign = Paint.Align.CENTER
++    }
++    private var lastHeight = -1
++    private var lastTint = 0
++
++    fun draw(canvas: Canvas, text: String, width: Int, height: Int) {
++        if (width <= 0 || height <= 0 || text.isBlank()) return
++        val tint = ctx.getColor(android.R.color.system_accent1_100)
++        if (height != lastHeight || tint != lastTint) {
++            lastHeight = height
++            lastTint = tint
++            val soft = (tint and 0x00ffffff) or (180 shl 24)
++            paint.shader = LinearGradient(0f, 0f, 0f, height.toFloat(),
++                intArrayOf(0xf5ffffff.toInt(), soft, 0x85ffffff.toInt(), soft, 0xf0ffffff.toInt()),
++                floatArrayOf(0f, .25f, .48f, .75f, 1f), Shader.TileMode.CLAMP)
++        }
++        paint.textSize = height * .70f
++        val measured = paint.measureText(text)
++        if (measured > width * .94f) paint.textSize *= width * .94f / measured
++        val fontHeight = paint.fontMetrics.descent - paint.fontMetrics.ascent
++        val verticalScale = (height * .93f / fontHeight).coerceIn(1f, 2.7f)
++        val save = canvas.save()
++        canvas.scale(1f, verticalScale, width / 2f, height / 2f)
++        val baseline = height / 2f - (paint.fontMetrics.ascent + paint.fontMetrics.descent) / 2f
++        canvas.drawText(text, width / 2f, baseline, paint)
++        canvas.restoreToCount(save)
++    }
++}

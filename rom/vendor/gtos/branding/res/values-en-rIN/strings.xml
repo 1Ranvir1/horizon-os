@@ -1,0 +1,5 @@
+<resources>
+<string name="lineageos_system_label">Horizon OS System</string>
+<string name="lineage_updates">Horizon OS updates</string>
+<string name="lineage_version">Horizon OS version</string>
+</resources>

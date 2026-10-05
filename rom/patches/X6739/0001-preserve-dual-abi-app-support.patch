@@ -1,0 +1,25 @@
+diff --git a/lineage_X6739.mk b/lineage_X6739.mk
+--- a/lineage_X6739.mk
++++ b/lineage_X6739.mk
+@@ -6,6 +6,6 @@
+ 
+ # Inherit from those products. Most specific first.
+-$(call inherit-product, $(SRC_TARGET_DIR)/product/core_64_bit_only.mk)
++$(call inherit-product, $(SRC_TARGET_DIR)/product/core_64_bit.mk)
+ $(call inherit-product, $(SRC_TARGET_DIR)/product/full_base_telephony.mk)
+ 
+ # Inherit from X6739 device
+diff --git a/BoardConfig.mk b/BoardConfig.mk
+--- a/BoardConfig.mk
++++ b/BoardConfig.mk
+@@ -27,8 +27,8 @@
+ TARGET_CPU_ABI2 :=
+ TARGET_CPU_VARIANT := cortex-a76
+ 
+-# Enable 64-bit for non-zygote.
+-ZYGOTE_FORCE_64 := true
++# Preserve the stock handset's 64-bit primary and 32-bit secondary app support.
++ZYGOTE_FORCE_64 := false
+ 
+ # Force any prefer32 targets to be compiled as 64 bit.
+ IGNORE_PREFER32_ON_DEVICE := true

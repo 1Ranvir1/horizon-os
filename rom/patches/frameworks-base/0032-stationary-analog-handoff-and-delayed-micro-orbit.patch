@@ -1,0 +1,154 @@
+--- a/packages/SystemUI/src/com/android/systemui/keyguard/ui/viewmodel/AodBurnInViewModel.kt
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/ui/viewmodel/AodBurnInViewModel.kt
+@@ -16,6 +16,8 @@
+ 
+ package com.android.systemui.keyguard.ui.viewmodel
+ 
++import android.content.Context
++import android.os.SystemClock
+ import android.util.Log
+ import android.util.MathUtils
+ import com.android.app.animation.Interpolators
+@@ -57,6 +59,7 @@
+ class AodBurnInViewModel
+ @Inject
+ constructor(
++    @Application context: Context,
+     @Application private val applicationScope: CoroutineScope,
+     private val burnInInteractor: BurnInInteractor,
+     @ShadeDisplayAware private val configurationInteractor: ConfigurationInteractor,
+@@ -69,6 +72,11 @@
+     private val keyguardClockViewModel: KeyguardClockViewModel,
+ ) {
+     private val TAG = "AodBurnInViewModel"
++    private val gtosAnalog = context.resources.getBoolean(R.bool.config_gtosGlassControls)
++    private var analogAodStartedAt = 0L
++    private var lastAnalogProgress = 0f
++    private var analogWakeStartProgress = 0f
++
+     private val burnInParams = MutableStateFlow(BurnInParameters())
+ 
+     fun updateBurnInParams(params: BurnInParameters) {
+@@ -96,7 +104,7 @@
+                     .flatMapLatest { dimens ->
+                         combine(
+                             keyguardInteractor.keyguardTranslationY.onStart { emit(0f) },
+-                            burnIn(params).onStart { emit(BurnInModel()) },
++                            burnIn(params).onStart { emit(if (gtosAnalog) BurnInModel(scale = 1f) else BurnInModel()) },
+                             goneToAodTransitionViewModel
+                                 .enterFromTopTranslationY(
+                                     dimens[R.dimen.keyguard_enter_from_top_translation_y]!!
+@@ -165,8 +173,7 @@
+             )
+ 
+     private fun burnIn(params: BurnInParameters): Flow<BurnInModel> {
+-        return combine(
+-            merge(
++        val transitions = merge(
+                     keyguardTransitionInteractor.transition(Edge.create(to = KeyguardState.AOD)),
+                     keyguardTransitionInteractor
+                         .transition(Edge.create(from = KeyguardState.AOD))
+@@ -176,7 +183,36 @@
+                         .filter { it.from != KeyguardState.AOD }
+                         .map { it.copy(value = 0f) },
+                 )
+-                .map { Interpolators.FAST_OUT_SLOW_IN.getInterpolation(it.value) },
++        val progress = if (!gtosAnalog) {
++            transitions.map { Interpolators.FAST_OUT_SLOW_IN.getInterpolation(it.value) }
++        } else {
++            transitions.map { step ->
++                if (step.to == KeyguardState.AOD &&
++                    (step.transitionState == com.android.systemui.keyguard.shared.model.TransitionState.STARTED
++                        || analogAodStartedAt == 0L)) {
++                    analogAodStartedAt = SystemClock.elapsedRealtime()
++                }
++                if (step.from == KeyguardState.AOD &&
++                    step.transitionState == com.android.systemui.keyguard.shared.model.TransitionState.STARTED) {
++                    analogWakeStartProgress = lastAnalogProgress
++                }
++                step
++            }.combine(keyguardInteractor.dozeTimeTick.onStart { emit(0L) }) { step, _ ->
++                // No timer, frame loop, alarm or wake lock: the existing native minute
++                // ticks ease in the small offset after the visible handoff has settled.
++                val value = when {
++                    step.to == KeyguardState.AOD -> GtosAnalogBurnIn.progress(
++                        SystemClock.elapsedRealtime() - analogAodStartedAt)
++                    step.from == KeyguardState.AOD -> analogWakeStartProgress *
++                        Interpolators.FAST_OUT_SLOW_IN.getInterpolation(step.value)
++                    else -> 0f
++                }
++                lastAnalogProgress = value
++                value
++            }
++        }
++        return combine(
++            progress,
+             burnInInteractor.burnIn(
+                 xDimenResourceId = R.dimen.burn_in_prevention_offset_x,
+                 yDimenResourceId = R.dimen.burn_in_prevention_offset_y,
+@@ -190,12 +226,14 @@
+             // the same as smartspace
+             val useScaleOnly = (!useAltAod) && keyguardClockViewModel.isLargeClockVisible.value
+ 
+-            val burnInY = MathUtils.lerp(0, burnIn.translationY, interpolated).toInt()
++            val burnInY = if (gtosAnalog) GtosAnalogBurnIn.offset(burnIn.translationY, interpolated)
++                else MathUtils.lerp(0, burnIn.translationY, interpolated).toInt()
+             val translationY = max(params.topInset - params.minViewY, burnInY)
+             BurnInModel(
+-                translationX = MathUtils.lerp(0, burnIn.translationX, interpolated).toInt(),
++                translationX = if (gtosAnalog) GtosAnalogBurnIn.offset(burnIn.translationX, interpolated)
++                    else MathUtils.lerp(0, burnIn.translationX, interpolated).toInt(),
+                 translationY = translationY,
+-                scale = MathUtils.lerp(burnIn.scale, MAX_LARGE_CLOCK_SCALE, 1f - interpolated),
++                scale = if (gtosAnalog) 1f else MathUtils.lerp(burnIn.scale, MAX_LARGE_CLOCK_SCALE, 1f - interpolated),
+                 scaleClockOnly = useScaleOnly,
+             )
+         }
+@@ -223,3 +261,13 @@
+     /** Whether the scale only applies to clock UI elements. */
+     val scaleClockOnly: Boolean = false,
+ )
++
++/** Same Home geometry through the handoff; a small orbit resumes on native AOD ticks. */
++internal object GtosAnalogBurnIn {
++    fun progress(elapsedMillis: Long): Float {
++        val t = ((elapsedMillis - 30_000L) / 120_000f).coerceIn(0f, 1f)
++        return t * t * (3f - 2f * t)
++    }
++    fun offset(nativePixels: Int, progress: Float): Int =
++        (nativePixels.coerceIn(-6, 6) * progress.coerceIn(0f, 1f)).toInt()
++}
+--- a/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/layout/sections/ClockSection.kt
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/layout/sections/ClockSection.kt
+@@ -162,10 +162,9 @@
+                     constrainWidth(id, ConstraintSet.MATCH_CONSTRAINT)
+                     constrainHeight(id, (metrics.widthPixels * .60f).toInt())
+                     setHorizontalBias(id, .5f)
+-                    if (keyguardClockViewModel.clockEventController.dozeAmount.value == 0f) {
+-                        setScaleX(id, 1f)
+-                        setScaleY(id, 1f)
+-                    }
++                    // Original Home ring retains its size as well as its base position.
++                    setScaleX(id, 1f)
++                    setScaleY(id, 1f)
+                 }
+                 clockInteractor.setNotificationStackDefaultTop(metrics.heightPixels * .66f)
+             }
+--- a/packages/SystemUI/tests/utils/src/com/android/systemui/keyguard/ui/viewmodel/AodBurnInViewModelKosmos.kt
++++ b/packages/SystemUI/tests/utils/src/com/android/systemui/keyguard/ui/viewmodel/AodBurnInViewModelKosmos.kt
+@@ -16,6 +16,7 @@
+ 
+ package com.android.systemui.keyguard.ui.viewmodel
+ 
++import android.content.applicationContext
+ import com.android.systemui.common.ui.domain.interactor.configurationInteractor
+ import com.android.systemui.keyguard.domain.interactor.burnInInteractor
+ import com.android.systemui.keyguard.domain.interactor.keyguardInteractor
+@@ -26,6 +27,7 @@
+ 
+ var Kosmos.aodBurnInViewModel by Fixture {
+     AodBurnInViewModel(
++        context = applicationContext,
+         applicationScope = applicationCoroutineScope,
+         burnInInteractor = burnInInteractor,
+         configurationInteractor = configurationInteractor,

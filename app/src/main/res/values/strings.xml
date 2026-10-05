@@ -1,0 +1,24 @@
+<resources>
+    <string name="sky_wallpaper_description">Living sky — sun and moon across Home and lock screen</string>
+    <string name="app_name">Horizon OS Launcher</string>
+    <string name="choose_home">Make this your home</string>
+    <string name="choose_home_hint">Choose Horizon OS Launcher in Android’s Home app chooser.</string>
+    <string name="set_default">Set as default Home</string>
+    <string name="search_apps">Search apps</string>
+    <string name="clear_search">Clear</string>
+    <string name="all_apps">APPLICATIONS</string>
+    <plurals name="app_count">
+        <item quantity="one">%1$d app</item>
+        <item quantity="other">%1$d apps</item>
+    </plurals>
+    <string name="loading_apps">Finding your apps…</string>
+    <string name="empty_catalog">No launchable apps found for this user.</string>
+    <string name="no_results">No matching apps</string>
+    <string name="no_results_hint">Try another name or package.</string>
+    <string name="load_error">Could not load apps. Try again.</string>
+    <string name="launch_error">This app could not be opened. It may have been removed or disabled.</string>
+    <string name="home_error">Android’s Home chooser is unavailable. Open Settings to choose your default Home app.</string>
+    <string name="retry">Retry</string>
+    <string name="dismiss">Dismiss</string>
+    <string name="open_app">Open %1$s</string>
+</resources>

@@ -1,0 +1,52 @@
+diff --git a/app/src/main/AndroidManifest.xml b/app/src/main/AndroidManifest.xml
+index 639a85e..5b0f787 100644
+--- a/app/src/main/AndroidManifest.xml
++++ b/app/src/main/AndroidManifest.xml
+@@ -12,6 +12,7 @@
+         android:name="android.hardware.camera.autofocus"
+         android:required="false" />
+ 
++    <uses-permission android:name="dev.gtos.photoenhancer.permission.ENHANCE" />
+     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+diff --git a/app/src/main/java/org/lineageos/aperture/CameraActivity.kt b/app/src/main/java/org/lineageos/aperture/CameraActivity.kt
+index edae6e0..262d61c 100644
+--- a/app/src/main/java/org/lineageos/aperture/CameraActivity.kt
++++ b/app/src/main/java/org/lineageos/aperture/CameraActivity.kt
+@@ -684,6 +684,7 @@ open class CameraActivity : AppCompatActivity(R.layout.activity_camera) {
+                         is Event.PhotoCaptureStatus.ImageSaved -> {
+                             if (!viewModel.inSingleCaptureMode.value) {
+                                 onCapturedMedia(event.output.savedUri)
++                                requestGtPhotoEnhancement(event.output.savedUri)
+                             } else {
+                                 event.output.savedUri?.let {
+                                     openCapturePreview(it, MediaType.PHOTO)
+@@ -1915,6 +1916,27 @@ open class CameraActivity : AppCompatActivity(R.layout.activity_camera) {
+      * can be passed to the gallery for viewing without unlocking the device. However, if the
+      * keyguard is no longer locked, clear any existing URIs, and do not add this one.
+      */
++    /** Background, read-only handoff. The enhancer saves a separate copy. */
++    private fun requestGtPhotoEnhancement(photo: Uri?) {
++        // Respect secure-camera boundaries and single-capture contracts.
++        if (photo == null || keyguardManager.isKeyguardLocked) return
++        val component = android.content.ComponentName(
++            "dev.gtos.photoenhancer", "dev.gtos.photoenhancer.EnhanceService"
++        )
++        val request = Intent("dev.gtos.photoenhancer.ENHANCE").apply {
++            this.component = component
++            data = photo
++            clipData = android.content.ClipData.newRawUri("Captured photo", photo)
++            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
++        }
++        try {
++            startForegroundService(request)
++        } catch (failure: RuntimeException) {
++            // An absent/disabled enhancer never breaks photo capture or gallery access.
++            android.util.Log.w("GTPhotoEnhance", "Enhancer unavailable; original saved", failure)
++        }
++    }
++
+     private fun onCapturedMedia(item: Uri?) {
+         updateGalleryButton(item, true)
+ 

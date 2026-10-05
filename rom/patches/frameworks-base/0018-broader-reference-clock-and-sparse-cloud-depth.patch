@@ -1,0 +1,48 @@
+--- a/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/GtosGlassClockPainter.kt
++++ b/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/GtosGlassClockPainter.kt
+@@ -17,7 +17,7 @@
+     }
+     private val ctx = context
+     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+-        typeface = Typeface.create(Typeface.create("sans-serif", Typeface.NORMAL), 300, false)
++        typeface = Typeface.create(Typeface.create("sans-serif", Typeface.NORMAL), 400, false)
+         textSize = 100f
+     }
+     private val ink = Path()
+--- a/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/KeyguardRootView.kt
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/KeyguardRootView.kt
+@@ -73,18 +73,16 @@
+         }
+         val t = android.os.SystemClock.uptimeMillis() / 1000f
+         val exit = (1f - alpha).coerceIn(0f, 1f)
+-        val cw = width * if (front) .76f else .83f
++        val cw = width * if (front) .56f else .65f
+         val ch = cw * bitmap.height / bitmap.width
+-        for (i in 0..1) {
+-            val base = width * (if (front) (if (i == 0) -.03f else .80f)
+-                else (if (i == 0) .22f else .98f))
++        for (i in 0..0) {
++            val base = width * if (front) .19f else .85f
+             val cx = base + kotlin.math.sin(t * .025f + i * 2f) * width * .08f
+             val direction = if (cx < width / 2f) -1f else 1f
+             val x = cx + direction * exit * (width + cw) * .8f
+-            val cy = if (front) clockRect.bottom - clockRect.height() * .18f
+-                else height * (.22f + i * .09f)
++            val cy = clockRect.top + clockRect.height() * if (front) .32f else .68f
+             cloudRect.set(x - cw / 2, cy - ch / 2, x + cw / 2, cy + ch / 2)
+-            cloudPaint.alpha = if (front) (if (i == 0) 80 else 110) else 64
++            cloudPaint.alpha = if (front) 100 else 40
+             canvas.drawBitmap(bitmap, null, cloudRect, cloudPaint)
+         }
+     }
+@@ -107,8 +105,8 @@
+         drawClouds(canvas, false)
+         super.dispatchDraw(canvas)
+         // Full-width layer with a feathered vertical mask: no rectangular cut at the clock edges.
+-        val top = clockRect.top + clockRect.height() * .59f
+-        val bottom = clockRect.bottom + clockRect.height() * .06f
++        val top = clockRect.top + clockRect.height() * .04f
++        val bottom = clockRect.top + clockRect.height() * .63f
+         if (maskTop != top || maskBottom != bottom) {
+             maskTop = top
+             maskBottom = bottom

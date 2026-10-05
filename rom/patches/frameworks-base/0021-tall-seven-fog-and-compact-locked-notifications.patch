@@ -1,0 +1,219 @@
+--- a/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/GtosGlassClockPainter.kt
++++ b/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/GtosGlassClockPainter.kt
+@@ -17,12 +17,14 @@
+     }
+     private val ctx = context
+     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+-        typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD)
++        typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+         textSize = 100f
+         val density = context.resources.displayMetrics.density
+         setShadowLayer(density * 3f, 0f, density * 1.2f, 0x50040d1a)
+     }
+     private val ink = Path()
++    private val glyphPath = Path()
++    private val glyphBounds = RectF()
+     private val hoursPath = Path()
+     private val minutesPath = Path()
+     private val hourBounds = RectF()
+@@ -34,6 +36,36 @@
+     private var lastWidth = -1
+     private var lastHeight = -1
+     private var lastTint = 0
++
++    /** Retain the tall regular face; balance only the seven's cap and diagonal. */
++    private fun buildDigits(text: String, start: Int, end: Int, target: Path, transform: Matrix) {
++        target.reset()
++        for (i in start until end) {
++            glyphPath.reset()
++            val advance = if (i == start) 0f else paint.measureText(text, start, i)
++            paint.getTextPath(text, i, i + 1, advance, 0f, glyphPath)
++            glyphPath.transform(transform)
++            if (text[i] == '7') {
++                glyphPath.computeBounds(glyphBounds, true)
++                val l = glyphBounds.left
++                val r = glyphBounds.right
++                val t = glyphBounds.top
++                val b = glyphBounds.bottom
++                val stroke = kotlin.math.min(glyphBounds.width() * .15f, glyphBounds.height() * .06f)
++                val foot = l + glyphBounds.width() * .14f
++                glyphPath.reset()
++                glyphPath.moveTo(l, t)
++                glyphPath.lineTo(r, t)
++                glyphPath.lineTo(r, t + stroke)
++                glyphPath.lineTo(foot + stroke, b)
++                glyphPath.lineTo(foot, b)
++                glyphPath.lineTo(r - stroke, t + stroke)
++                glyphPath.lineTo(l, t + stroke)
++                glyphPath.close()
++            }
++            target.addPath(glyphPath)
++        }
++    }
+ 
+     fun draw(canvas: Canvas, text: String, width: Int, height: Int) {
+         if (width <= 0 || height <= 0 || text.isBlank()) return
+@@ -54,33 +86,30 @@
+                 val top = kotlin.math.min(hourBounds.top, minuteBounds.top)
+                 val bottom = kotlin.math.max(hourBounds.bottom, minuteBounds.bottom)
+                 val gap = width * .14f
+-                // Keep the bold font's natural stroke proportions: one uniform scale.
+-                val scale = kotlin.math.min(width * .81f / (hourBounds.width() + minuteBounds.width()),
+-                        height * .94f / (bottom - top))
+-                val digitsWidth = (hourBounds.width() + minuteBounds.width()) * scale
+-                val x = (width - digitsWidth - gap) / 2f
+-                val y = (height - (bottom - top) * scale) / 2f
+-                matrix.setScale(scale, scale)
+-                matrix.postTranslate(x - hourBounds.left * scale, y - top * scale)
+-                hoursPath.transform(matrix)
+-                val minuteX = x + hourBounds.width() * scale + gap
+-                matrix.setScale(scale, scale)
+-                matrix.postTranslate(minuteX - minuteBounds.left * scale, y - top * scale)
+-                minutesPath.transform(matrix)
++                val sx = width * .81f / (hourBounds.width() + minuteBounds.width())
++                val sy = height * .94f / (bottom - top)
++                val x = width * .025f
++                val y = height * .03f
++                matrix.setScale(sx, sy)
++                matrix.postTranslate(x - hourBounds.left * sx, y - top * sy)
++                buildDigits(text, 0, separator, hoursPath, matrix)
++                val minuteX = x + hourBounds.width() * sx + gap
++                matrix.setScale(sx, sy)
++                matrix.postTranslate(minuteX - minuteBounds.left * sx, y - top * sy)
++                buildDigits(text, separator + 1, text.length, minutesPath, matrix)
+                 ink.addPath(hoursPath)
+                 ink.addPath(minutesPath)
+                 // Round dots stay centered around half the clock height.
+-                val dotX = x + hourBounds.width() * scale + gap / 2f
++                val dotX = x + hourBounds.width() * sx + gap / 2f
+                 val radius = width * .019f
+-                val digitHeight = (bottom - top) * scale
+-                ink.addCircle(dotX, y + digitHeight * .32f, radius, Path.Direction.CW)
+-                ink.addCircle(dotX, y + digitHeight * .68f, radius, Path.Direction.CW)
++                ink.addCircle(dotX, height * .32f, radius, Path.Direction.CW)
++                ink.addCircle(dotX, height * .68f, radius, Path.Direction.CW)
+             } else {
+                 paint.getTextPath(text, 0, text.length, 0f, 0f, ink)
+                 ink.computeBounds(sourceBounds, true)
+                 if (sourceBounds.isEmpty) return
+                 targetBounds.set(width * .025f, height * .03f, width * .975f, height * .97f)
+-                matrix.setRectToRect(sourceBounds, targetBounds, Matrix.ScaleToFit.CENTER)
++                matrix.setRectToRect(sourceBounds, targetBounds, Matrix.ScaleToFit.FILL)
+                 ink.transform(matrix)
+             }
+             lastTint = 0
+@@ -91,8 +120,9 @@
+             val translucent = (tint and 0x00ffffff) or (110 shl 24)
+             val body = (tint and 0x00ffffff) or (148 shl 24)
+             paint.shader = LinearGradient(0f, 0f, 0f, height.toFloat(),
+-                intArrayOf(0x99f6fcff.toInt(), translucent, body, 0xbbf6fcff.toInt()),
+-                floatArrayOf(0f, .45f, .58f, 1f), Shader.TileMode.CLAMP)
++                intArrayOf(0x99f6fcff.toInt(), translucent, body,
++                    (tint and 0x00ffffff) or (112 shl 24), (tint and 0x00ffffff) or (10 shl 24)),
++                floatArrayOf(0f, .45f, .64f, .79f, 1f), Shader.TileMode.CLAMP)
+         }
+         canvas.drawPath(ink, paint)
+     }
+--- a/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/KeyguardRootView.kt
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/KeyguardRootView.kt
+@@ -40,6 +40,12 @@
+     private val cloudMask = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+         xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.DST_IN)
+     }
++    private val fogPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
++    private val fogMatrix = android.graphics.Matrix()
++    private val fogRect = android.graphics.RectF()
++    private var fogTint = 0
++    private var fogClockBottom = -1f
++    private var fogWidth = -1
+     private var maskTop = -1f
+     private var maskBottom = -1f
+     private var lastTint = 0
+@@ -87,6 +93,30 @@
+         }
+     }
+ 
++    private fun drawClockFog(canvas: android.graphics.Canvas) {
++        val tint = context.getColor(android.R.color.system_accent1_100)
++        val bottom = clockRect.bottom.toFloat()
++        if (fogTint != tint || fogClockBottom != bottom || fogWidth != width) {
++            fogTint = tint
++            fogClockBottom = bottom
++            fogWidth = width
++            val cx = width * .5f
++            val cy = bottom - clockRect.height() * .045f
++            val rx = width * .6f
++            val ry = clockRect.height() * .16f
++            fogRect.set(cx - rx, cy - ry, cx + rx, cy + ry)
++            val shader = android.graphics.RadialGradient(0f, 0f, 1f,
++                intArrayOf((tint and 0x00ffffff) or (30 shl 24),
++                    (tint and 0x00ffffff) or (14 shl 24), tint and 0x00ffffff),
++                floatArrayOf(0f, .48f, 1f), android.graphics.Shader.TileMode.CLAMP)
++            fogMatrix.setScale(rx, ry)
++            fogMatrix.postTranslate(cx, cy)
++            shader.setLocalMatrix(fogMatrix)
++            fogPaint.shader = shader
++        }
++        canvas.drawOval(fogRect, fogPaint)
++    }
++
+     override fun dispatchDraw(canvas: android.graphics.Canvas) {
+         val active = depthEnabled && display?.state == android.view.Display.STATE_ON && isShown
+         if (!active) { super.dispatchDraw(canvas); return }
+@@ -104,6 +134,7 @@
+         offsetDescendantRectToMyCoords(clock, clockRect)
+         drawClouds(canvas, false)
+         super.dispatchDraw(canvas)
++        drawClockFog(canvas)
+         // Full-width layer with a feathered vertical mask: no rectangular cut at the clock edges.
+         val top = clockRect.top + clockRect.height() * .04f
+         val bottom = clockRect.top + clockRect.height() * .63f
+--- a/packages/SystemUI/src/com/android/systemui/statusbar/notification/stack/NotificationStackScrollLayout.java
++++ b/packages/SystemUI/src/com/android/systemui/statusbar/notification/stack/NotificationStackScrollLayout.java
+@@ -2435,9 +2435,25 @@
+ 
+     private int getGtosLockListBottom() {
+         getLocationOnScreen(mTempInt2);
+-        return Math.min(getHeight(), (int) (getResources().getDisplayMetrics().heightPixels * .855f)
+-                - mTempInt2[1]);
+-    }
++        int safeBottom = Math.min(getHeight(),
++                (int) (getResources().getDisplayMetrics().heightPixels * .855f) - mTempInt2[1]);
++        int firstHeight = 0;
++        int secondHeight = 0;
++        for (int i = 0; i < getChildCount(); i++) {
++            View child = getChildAt(i);
++            if (!(child instanceof ExpandableNotificationRow row) || child.getVisibility() == GONE) continue;
++            int height = row.getIntrinsicHeight();
++            if (height <= 0) continue;
++            if (firstHeight == 0) firstHeight = height;
++            else { secondHeight = height; break; }
++        }
++        if (firstHeight == 0) return safeBottom;
++        int compactBottom = getTopPadding() + firstHeight;
++        if (secondHeight > 0) compactBottom += mPaddingBetweenElements + Math.round(secondHeight * .5f);
++        return Math.min(safeBottom, compactBottom);
++    }
++
++    private Boolean mGtosOriginalVerticalScrollbar;
+ 
+     private boolean isScrollingEnabled() {
+         return mScrollingEnabled || (isGtosGlassLockscreenList() && !mQsFullScreen);
+@@ -5853,6 +5869,17 @@
+     @VisibleForTesting
+     public void setStatusBarState(int statusBarState) {
+         mStatusBarState = statusBarState;
++        if (getResources().getBoolean(com.android.systemui.res.R.bool.config_gtosGlassControls)) {
++            if (statusBarState == StatusBarState.KEYGUARD) {
++                if (mGtosOriginalVerticalScrollbar == null) {
++                    mGtosOriginalVerticalScrollbar = isVerticalScrollBarEnabled();
++                }
++                setVerticalScrollBarEnabled(false);
++            } else if (mGtosOriginalVerticalScrollbar != null) {
++                setVerticalScrollBarEnabled(mGtosOriginalVerticalScrollbar);
++                mGtosOriginalVerticalScrollbar = null;
++            }
++        }
+         mAmbientState.setStatusBarState(statusBarState);
+         if (!SceneContainerFlag.isEnabled()) {
+             mShelf.setOnKeyguard(statusBarState == StatusBarState.KEYGUARD);

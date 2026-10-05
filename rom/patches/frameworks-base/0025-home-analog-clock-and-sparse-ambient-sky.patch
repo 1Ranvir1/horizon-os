@@ -1,0 +1,975 @@
+--- a/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/GtosGlassClockPainter.kt
++++ b/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/GtosGlassClockPainter.kt
+@@ -2,142 +2,46 @@
+ 
+ import android.content.Context
+ import android.graphics.Canvas
+-import android.graphics.LinearGradient
+-import android.graphics.Matrix
+ import android.graphics.Paint
+-import android.graphics.Path
+ import android.graphics.RectF
+-import android.graphics.Shader
+-import android.graphics.Typeface
++import android.graphics.BitmapFactory
++import java.util.Calendar
+ 
+-/** Native time/accessibility stays authoritative. Cached ink bounds avoid narrow wrap sizing. */
++/** Reuse DeskClock's Home artwork. Native events/accessibility remain authoritative. */
+ internal class GtosGlassClockPainter(context: Context) {
+-    val enabled: Boolean = context.resources.getIdentifier("config_gtosGlassControls", "bool", context.packageName).let {
++    val enabled = context.resources.getIdentifier("config_gtosGlassControls", "bool", context.packageName).let {
+         it != 0 && context.resources.getBoolean(it)
+     }
+-    private val ctx = context
+-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+-        typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+-        textSize = 100f
+-        val density = context.resources.displayMetrics.density
+-        setShadowLayer(density * 3f, 0f, density * 1.2f, 0x50040d1a)
+-    }
+-    private val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+-        style = Paint.Style.STROKE
+-        strokeWidth = context.resources.displayMetrics.density * .45f
+-    }
+-    private val ink = Path()
+-    private val glyphPath = Path()
+-    private val glyphBounds = RectF()
+-    private val hoursPath = Path()
+-    private val minutesPath = Path()
+-    private val hourBounds = RectF()
+-    private val minuteBounds = RectF()
+-    private val sourceBounds = RectF()
+-    private val targetBounds = RectF()
+-    private val matrix = Matrix()
+-    private var lastText = ""
+-    private var lastWidth = -1
+-    private var lastHeight = -1
+-    private var lastTint = 0
++    private fun bitmap(name: String) = BitmapFactory.decodeResource(context.resources,
++        context.resources.getIdentifier(name, "drawable", context.packageName))
++    private val dial by lazy { bitmap("gtos_analog_dial") }
++    private val hour by lazy { bitmap("gtos_analog_hour") }
++    private val minute by lazy { bitmap("gtos_analog_minute") }
++    private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
++    private val bounds = RectF()
++    private val calendar = Calendar.getInstance()
+ 
+-    /** Retain the tall regular face; balance only the seven's cap and diagonal. */
+-    private fun buildDigits(text: String, start: Int, end: Int, target: Path, transform: Matrix) {
+-        target.reset()
+-        for (i in start until end) {
+-            glyphPath.reset()
+-            val advance = if (i == start) 0f else paint.measureText(text, start, i)
+-            paint.getTextPath(text, i, i + 1, advance, 0f, glyphPath)
+-            glyphPath.transform(transform)
+-            if (text[i] == '7') {
+-                glyphPath.computeBounds(glyphBounds, true)
+-                val l = glyphBounds.left
+-                val r = glyphBounds.right
+-                val t = glyphBounds.top
+-                val b = glyphBounds.bottom
+-                val stroke = kotlin.math.min(glyphBounds.width() * .15f, glyphBounds.height() * .06f)
+-                val foot = l + glyphBounds.width() * .14f
+-                glyphPath.reset()
+-                glyphPath.moveTo(l, t)
+-                glyphPath.lineTo(r, t)
+-                glyphPath.lineTo(r, t + stroke)
+-                glyphPath.lineTo(foot + stroke, b)
+-                glyphPath.lineTo(foot, b)
+-                glyphPath.lineTo(r - stroke, t + stroke)
+-                glyphPath.lineTo(l, t + stroke)
+-                glyphPath.close()
+-            }
+-            target.addPath(glyphPath)
+-        }
+-    }
+-
++    @Suppress("UNUSED_PARAMETER")
+     fun draw(canvas: Canvas, text: String, width: Int, height: Int, dozeFraction: Float = 0f) {
+-        if (width <= 0 || height <= 0 || text.isBlank()) return
+-        if (lastText != text || lastWidth != width || lastHeight != height) {
+-            lastText = text
+-            lastWidth = width
+-            lastHeight = height
+-            ink.reset()
+-            val separator = text.indexOf(':')
+-            if (separator > 0 && separator < text.lastIndex) {
+-                hoursPath.reset()
+-                minutesPath.reset()
+-                paint.getTextPath(text, 0, separator, 0f, 0f, hoursPath)
+-                paint.getTextPath(text, separator + 1, text.length, 0f, 0f, minutesPath)
+-                hoursPath.computeBounds(hourBounds, true)
+-                minutesPath.computeBounds(minuteBounds, true)
+-                if (hourBounds.isEmpty || minuteBounds.isEmpty) return
+-                val top = kotlin.math.min(hourBounds.top, minuteBounds.top)
+-                val bottom = kotlin.math.max(hourBounds.bottom, minuteBounds.bottom)
+-                val gap = width * .14f
+-                val sx = width * .81f / (hourBounds.width() + minuteBounds.width())
+-                val sy = height * .94f / (bottom - top)
+-                val x = width * .025f
+-                val y = height * .03f
+-                matrix.setScale(sx, sy)
+-                matrix.postTranslate(x - hourBounds.left * sx, y - top * sy)
+-                buildDigits(text, 0, separator, hoursPath, matrix)
+-                val minuteX = x + hourBounds.width() * sx + gap
+-                matrix.setScale(sx, sy)
+-                matrix.postTranslate(minuteX - minuteBounds.left * sx, y - top * sy)
+-                buildDigits(text, separator + 1, text.length, minutesPath, matrix)
+-                ink.addPath(hoursPath)
+-                ink.addPath(minutesPath)
+-                // Round dots stay centered around half the clock height.
+-                val dotX = x + hourBounds.width() * sx + gap / 2f
+-                val radius = width * .019f
+-                ink.addCircle(dotX, height * .32f, radius, Path.Direction.CW)
+-                ink.addCircle(dotX, height * .68f, radius, Path.Direction.CW)
+-            } else {
+-                paint.getTextPath(text, 0, text.length, 0f, 0f, ink)
+-                ink.computeBounds(sourceBounds, true)
+-                if (sourceBounds.isEmpty) return
+-                targetBounds.set(width * .025f, height * .03f, width * .975f, height * .97f)
+-                matrix.setRectToRect(sourceBounds, targetBounds, Matrix.ScaleToFit.FILL)
+-                ink.transform(matrix)
+-            }
+-            lastTint = 0
+-        }
+-        val tint = ctx.getColor(android.R.color.system_accent1_100)
+-        if (tint != lastTint) {
+-            lastTint = tint
+-            val translucent = (tint and 0x00ffffff) or (110 shl 24)
+-            val body = (tint and 0x00ffffff) or (148 shl 24)
+-            paint.shader = LinearGradient(0f, 0f, 0f, height.toFloat(),
+-                intArrayOf(0x99f6fcff.toInt(), 0xc2f6fcff.toInt(),
+-                    (tint and 0x00ffffff) or (84 shl 24), translucent, body,
+-                    (tint and 0x00ffffff) or (112 shl 24), (tint and 0x00ffffff) or (10 shl 24)),
+-                floatArrayOf(0f, .18f, .35f, .5f, .64f, .79f, 1f), Shader.TileMode.CLAMP)
+-            rimPaint.shader = LinearGradient(0f, 0f, 0f, height.toFloat(),
+-                intArrayOf(0xa6f6fcff.toInt(), (tint and 0x00ffffff) or (35 shl 24),
+-                    (tint and 0x00ffffff) or (68 shl 24), tint and 0x00ffffff),
+-                floatArrayOf(0f, .48f, .75f, 1f), Shader.TileMode.CLAMP)
+-        }
+-        // Same cached silhouette in AOD; native doze interpolation smoothly changes brightness.
+-        val opacity = (255f * (1f - .55f * dozeFraction.coerceIn(0f, 1f))).toInt()
+-        paint.alpha = opacity
+-        rimPaint.alpha = opacity
+-        canvas.drawPath(ink, paint)
+-        canvas.drawPath(ink, rimPaint)
++        if (width <= 0 || height <= 0) return
++        // Refresh the device time zone too, including automatic travel/time-zone changes.
++        calendar.timeZone = java.util.TimeZone.getDefault()
++        calendar.timeInMillis = System.currentTimeMillis()
++        val minutes = calendar.get(Calendar.MINUTE).toFloat()
++        val hours = calendar.get(Calendar.HOUR) + minutes / 60f
++        val size = kotlin.math.min(width, height).toFloat()
++        val cx = width / 2f
++        val cy = height / 2f
++        bounds.set(cx - size / 2, cy - size / 2, cx + size / 2, cy + size / 2)
++        paint.alpha = (255 * (1f - .55f * dozeFraction.coerceIn(0f, 1f))).toInt()
++        dial?.let { canvas.drawBitmap(it, null, bounds, paint) }
++        val saveHour = canvas.save()
++        canvas.rotate(hours * 30f, cx, cy)
++        hour?.let { canvas.drawBitmap(it, null, bounds, paint) }
++        canvas.restoreToCount(saveHour)
++        val saveMinute = canvas.save()
++        canvas.rotate(minutes * 6f, cx, cy)
++        minute?.let { canvas.drawBitmap(it, null, bounds, paint) }
++        canvas.restoreToCount(saveMinute)
+     }
+ }
+--- a/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/FlexClockTextView.kt
++++ b/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/FlexClockTextView.kt
+@@ -36,8 +36,8 @@
+     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+         super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+         if (glassClock.enabled && !isLargeClock) {
+-            val wantedWidth = (resources.displayMetrics.widthPixels * .88f).toInt()
+-            val wantedHeight = (resources.displayMetrics.heightPixels * .345f).toInt()
++            val wantedWidth = (resources.displayMetrics.widthPixels * .60f).toInt()
++            val wantedHeight = (resources.displayMetrics.widthPixels * .60f).toInt()
+             setMeasuredDimension(resolveSize(wantedWidth, widthMeasureSpec),
+                 resolveSize(wantedHeight, heightMeasureSpec))
+         }
+--- a/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/FlexClockViewGroup.kt
++++ b/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/FlexClockViewGroup.kt
+@@ -141,8 +141,8 @@
+         val yBuffer = context.resources.getDimensionPixelSize(R.dimen.clock_vertical_digit_buffer)
+         val nativeSize = (maxChildSize + aodTranslate.abs()) * VPointF(xScale, 2f) + VPointF(0f, yBuffer)
+         return if (glassClock.enabled)
+-            VPointF(resolveSize((resources.displayMetrics.widthPixels * .88f).toInt(), widthMeasureSpec).toFloat(),
+-                resolveSize((resources.displayMetrics.heightPixels * .345f).toInt(), heightMeasureSpec).toFloat())
++            VPointF(resolveSize((resources.displayMetrics.widthPixels * .60f).toInt(), widthMeasureSpec).toFloat(),
++                resolveSize((resources.displayMetrics.widthPixels * .60f).toInt(), heightMeasureSpec).toFloat())
+             else nativeSize
+     }
+ 
+--- a/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/layout/sections/ClockSection.kt
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/layout/sections/ClockSection.kt
+@@ -152,15 +152,15 @@
+             // Keep the same base geometry in AOD and awake; preserve native burn-in movement.
+             if (context.resources.getBoolean(R.bool.config_gtosGlassControls)) {
+                 val metrics = context.resources.displayMetrics
+-                val side = (metrics.widthPixels * .06f).toInt()
++                val side = (metrics.widthPixels * .20f).toInt()
+                 for (id in intArrayOf(ClockViewIds.LOCKSCREEN_CLOCK_VIEW_SMALL,
+                         ClockViewIds.LOCKSCREEN_CLOCK_VIEW_LARGE)) {
+                     clear(id, BOTTOM)
+                     connect(id, START, PARENT_ID, START, side)
+                     connect(id, END, PARENT_ID, END, side)
+-                    connect(id, TOP, PARENT_ID, TOP, (metrics.heightPixels * .127f).toInt())
++                    connect(id, TOP, PARENT_ID, TOP, (metrics.heightPixels * .45625f - metrics.widthPixels * .30f).toInt())
+                     constrainWidth(id, ConstraintSet.MATCH_CONSTRAINT)
+-                    constrainHeight(id, (metrics.heightPixels * .345f).toInt())
++                    constrainHeight(id, (metrics.widthPixels * .60f).toInt())
+                     setHorizontalBias(id, .5f)
+                     if (keyguardClockViewModel.clockEventController.dozeAmount.value == 0f) {
+                         setScaleX(id, 1f)
+--- a/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/KeyguardRootView.kt
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/KeyguardRootView.kt
+@@ -30,36 +30,18 @@
+         context,
+         attrs,
+     ) {
+-    private val depthEnabled = resources.getBoolean(com.android.systemui.res.R.bool.config_gtosGlassControls)
+-    private val cloud by lazy {
+-        android.graphics.BitmapFactory.decodeResource(resources, com.android.systemui.res.R.drawable.gtos_depth_cloud)
+-    }
+-    private val cloudPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG)
+-    private val cloudRect = android.graphics.RectF()
+-    private val clockRect = android.graphics.Rect()
+-    private val cloudMask = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+-        xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.DST_IN)
+-    }
+-    private val fogPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+-    private val fogMatrix = android.graphics.Matrix()
+-    private val fogRect = android.graphics.RectF()
+-    private var fogTint = 0
+-    private var fogClockBottom = -1f
+-    private var fogWidth = -1
+-    private var fogHeight = -1
+-    private var maskTop = -1f
+-    private var maskBottom = -1f
+-    private var lastTint = 0
+-    private var lastFrame = 0L
++    private val ambientEnabled = resources.getBoolean(com.android.systemui.res.R.bool.config_gtosGlassControls)
++    private val ambientSky = GtosAmbientSky(context)
++    private val blackPaint = android.graphics.Paint()
+     private var clockView: android.view.View? = null
++    private var lastClockCheck = 0L
+ 
+     private fun findClock(group: android.view.ViewGroup): android.view.View? {
+         var largest: android.view.View? = null
+         for (i in 0 until group.childCount) {
+             val child = group.getChildAt(i)
+-            if (!child.isShown) continue
+-            val candidate = if (child is com.android.systemui.shared.clocks.AnimatableClockView
+-                || child is com.android.systemui.shared.clocks.view.FlexClockTextView
++            if (child.visibility != android.view.View.VISIBLE) continue
++            val candidate = if (child is com.android.systemui.shared.clocks.view.FlexClockTextView
+                 || child is com.android.systemui.shared.clocks.view.FlexClockViewGroup) child
+                 else if (child is android.view.ViewGroup) findClock(child) else null
+             if (candidate != null && candidate.width * candidate.height > (largest?.let { it.width * it.height } ?: 0)) largest = candidate
+@@ -67,101 +49,38 @@
+         return largest
+     }
+ 
+-    private fun awakeFraction(): Float {
+-        val amount = when (val view = clockView) {
++    override fun onDetachedFromWindow() {
++        ambientSky.cancel()
++        super.onDetachedFromWindow()
++    }
++
++    override fun dispatchDraw(canvas: android.graphics.Canvas) {
++        if (!ambientEnabled || !isShown) { super.dispatchDraw(canvas); return }
++        val now = android.os.SystemClock.uptimeMillis()
++        if (now - lastClockCheck > 300 || clockView?.visibility != android.view.View.VISIBLE) {
++            clockView = findClock(this)
++            lastClockCheck = now
++        }
++        val doze = when (val view = clockView) {
+             is com.android.systemui.shared.clocks.view.FlexClockTextView -> view.dozeFraction
+             is com.android.systemui.shared.clocks.view.FlexClockViewGroup -> view.dozeFraction
+             else -> 0f
++        }.coerceIn(0f, 1f)
++        if (clockView != null) ambientSky.refresh(this)
++        if (doze > 0f) {
++            // Only a black background and sparse objects; no full sky/cloud/weather surface.
++            blackPaint.color = android.graphics.Color.BLACK
++            blackPaint.alpha = (doze * 255).toInt()
++            canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), blackPaint)
++            ambientSky.draw(canvas, width.toFloat(), height.toFloat(), doze * .45f)
+         }
+-        return 1f - amount.coerceIn(0f, 1f)
+-    }
+-
+-    private fun drawClouds(canvas: android.graphics.Canvas, front: Boolean) {
+-        val bitmap = cloud ?: return
+-        val tint = context.getColor(android.R.color.system_accent1_100)
+-        if (lastTint != tint) {
+-            lastTint = tint
+-            cloudPaint.colorFilter = android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix(floatArrayOf(
+-                android.graphics.Color.red(tint) / 255f, 0f, 0f, 0f, 0f,
+-                0f, android.graphics.Color.green(tint) / 255f, 0f, 0f, 0f,
+-                0f, 0f, android.graphics.Color.blue(tint) / 255f, 0f, 0f,
+-                0f, 0f, 0f, 1f, 0f)))
+-        }
+-        val t = android.os.SystemClock.uptimeMillis() / 1000f
+-        val exit = (1f - alpha).coerceIn(0f, 1f)
+-        val cw = width * if (front) .56f else .65f
+-        val ch = cw * bitmap.height / bitmap.width
+-        for (i in 0..0) {
+-            val base = width * if (front) .19f else .85f
+-            val cx = base + kotlin.math.sin(t * .025f + i * 2f) * width * .08f
+-            val direction = if (cx < width / 2f) -1f else 1f
+-            val x = cx + direction * exit * (width + cw) * .8f
+-            val cy = clockRect.top + clockRect.height() * if (front) .32f else .68f
+-            cloudRect.set(x - cw / 2, cy - ch / 2, x + cw / 2, cy + ch / 2)
+-            cloudPaint.alpha = ((if (front) 100 else 40) * awakeFraction()).toInt()
+-            canvas.drawBitmap(bitmap, null, cloudRect, cloudPaint)
++        super.dispatchDraw(canvas)
++        val state = display?.state
++        // Never keep the CPU/display awake or animate in hardware doze-suspend.
++        // Native AOD time ticks still refresh celestial position/twinkle while suspended.
++        if (doze > 0f && android.animation.ValueAnimator.areAnimatorsEnabled()
++            && (state == android.view.Display.STATE_ON || state == android.view.Display.STATE_DOZE)) {
++            postInvalidateDelayed(if (state == android.view.Display.STATE_ON) 33 else 100)
+         }
+     }
+-
+-    private fun drawClockFog(canvas: android.graphics.Canvas) {
+-        val tint = context.getColor(android.R.color.system_accent1_100)
+-        val bottom = clockRect.bottom.toFloat()
+-        if (fogTint != tint || fogClockBottom != bottom || fogWidth != width || fogHeight != clockRect.height()) {
+-            fogTint = tint
+-            fogClockBottom = bottom
+-            fogWidth = width
+-            fogHeight = clockRect.height()
+-            val cx = width * .5f
+-            val cy = bottom - clockRect.height() * .045f
+-            val rx = width * .6f
+-            val ry = clockRect.height() * .16f
+-            fogRect.set(cx - rx, cy - ry, cx + rx, cy + ry)
+-            val shader = android.graphics.RadialGradient(0f, 0f, 1f,
+-                intArrayOf((tint and 0x00ffffff) or (30 shl 24),
+-                    (tint and 0x00ffffff) or (14 shl 24), tint and 0x00ffffff),
+-                floatArrayOf(0f, .48f, 1f), android.graphics.Shader.TileMode.CLAMP)
+-            fogMatrix.setScale(rx, ry)
+-            fogMatrix.postTranslate(cx, cy)
+-            shader.setLocalMatrix(fogMatrix)
+-            fogPaint.shader = shader
+-        }
+-        fogPaint.alpha = (255f * awakeFraction()).toInt()
+-        canvas.drawOval(fogRect, fogPaint)
+-    }
+-
+-    override fun dispatchDraw(canvas: android.graphics.Canvas) {
+-        val active = depthEnabled && display?.state == android.view.Display.STATE_ON && isShown
+-        if (!active) { super.dispatchDraw(canvas); return }
+-        val now = android.os.SystemClock.uptimeMillis()
+-        if (now - lastFrame > 300 || clockView?.isShown != true) {
+-            clockView = findClock(this)
+-            lastFrame = now
+-        }
+-        val clock = clockView
+-        if (clock == null || clock.width == 0 || clock.height == 0) {
+-            super.dispatchDraw(canvas)
+-            return
+-        }
+-        clock.getDrawingRect(clockRect)
+-        offsetDescendantRectToMyCoords(clock, clockRect)
+-        drawClouds(canvas, false)
+-        super.dispatchDraw(canvas)
+-        drawClockFog(canvas)
+-        // Full-width layer with a feathered vertical mask: no rectangular cut at the clock edges.
+-        val top = clockRect.top + clockRect.height() * .04f
+-        val bottom = clockRect.top + clockRect.height() * .63f
+-        if (maskTop != top || maskBottom != bottom) {
+-            maskTop = top
+-            maskBottom = bottom
+-            cloudMask.shader = android.graphics.LinearGradient(0f, top, 0f, bottom,
+-                intArrayOf(0x00ffffff, 0xffffffff.toInt(), 0xffffffff.toInt(), 0x00ffffff),
+-                floatArrayOf(0f, .24f, .76f, 1f), android.graphics.Shader.TileMode.CLAMP)
+-        }
+-        val save = canvas.saveLayer(0f, top, width.toFloat(), bottom, null)
+-        canvas.clipRect(0f, top, width.toFloat(), bottom)
+-        drawClouds(canvas, true)
+-        canvas.drawRect(0f, top, width.toFloat(), bottom, cloudMask)
+-        canvas.restoreToCount(save)
+-        if (android.animation.ValueAnimator.areAnimatorsEnabled()) postInvalidateDelayed(33)
+-    }
+ }
+--- /dev/null
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/SkyAstronomy.kt
+@@ -0,0 +1,52 @@
++package com.android.systemui.keyguard.ui.view
++
++import kotlin.math.*
++
++/** SunCalc BSD-2-Clause equations; UTC instants, angles in radians internally. */
++object SkyAstronomy {
++    data class Body(val altitude: Double, val azimuth: Double, val parallacticAngle: Double = 0.0)
++    data class Moon(val position: Body, val fraction: Double, val phase: Double, val limbAngle: Double)
++    private data class Equatorial(val ra: Double, val dec: Double, val distance: Double)
++    private val rad = PI / 180.0
++    private val obliquity = 23.4397 * rad
++    private fun days(now: Long) = now / 86400000.0 - .5 + 2440588 - 2451545
++    private fun coordinates(l: Double, b: Double, distance: Double) = Equatorial(
++        atan2(sin(l) * cos(obliquity) - tan(b) * sin(obliquity), cos(l)),
++        asin(sin(b) * cos(obliquity) + cos(b) * sin(obliquity) * sin(l)), distance)
++    private fun solar(d: Double): Equatorial {
++        val m = rad * (357.5291 + .98560028 * d)
++        val c = rad * (1.9148 * sin(m) + .02 * sin(2 * m) + .0003 * sin(3 * m))
++        return coordinates(m + c + 102.9372 * rad + PI, 0.0, 149598000.0)
++    }
++    private fun lunar(d: Double): Equatorial {
++        val m = rad * (134.963 + 13.064993 * d)
++        return coordinates(rad * (218.316 + 13.176396 * d) + rad * 6.289 * sin(m),
++            rad * 5.128 * sin(rad * (93.272 + 13.229350 * d)), 385001 - 20905 * cos(m))
++    }
++    private fun position(d: Double, lat: Double, lon: Double, c: Equatorial, moon: Boolean): Body {
++        val phi = lat * rad
++        val h = rad * (280.16 + 360.9856235 * d + lon) - c.ra
++        var altitude = asin(sin(phi) * sin(c.dec) + cos(phi) * cos(c.dec) * cos(h))
++        if (moon) {
++            val a = altitude.coerceAtLeast(0.0)
++            altitude += .0002967 / tan(a + .00312536 / (a + .08901179))
++        }
++        val azimuth = atan2(sin(h), cos(h) * sin(phi) - tan(c.dec) * cos(phi))
++        return Body(altitude / rad, (azimuth / rad + 180) % 360,
++            atan2(sin(h), tan(phi) * cos(c.dec) - sin(c.dec) * cos(h)))
++    }
++    fun sun(now: Long, latitude: Double, longitude: Double): Body =
++        position(days(now), latitude, longitude, solar(days(now)), false)
++    fun moon(now: Long, latitude: Double, longitude: Double): Moon {
++        val d = days(now)
++        val s = solar(d)
++        val m = lunar(d)
++        val separation = acos((sin(s.dec) * sin(m.dec) + cos(s.dec) * cos(m.dec) * cos(s.ra - m.ra)).coerceIn(-1.0, 1.0))
++        val incidence = atan2(s.distance * sin(separation), m.distance - s.distance * cos(separation))
++        val angle = atan2(cos(s.dec) * sin(s.ra - m.ra),
++            sin(s.dec) * cos(m.dec) - cos(s.dec) * sin(m.dec) * cos(s.ra - m.ra))
++        val body = position(d, latitude, longitude, m, true)
++        return Moon(body, (1 + cos(incidence)) / 2,
++            .5 + .5 * incidence * (if (angle < 0) -1 else 1) / PI, angle - body.parallacticAngle)
++    }
++}
+--- /dev/null
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/SkyMeteor.kt
+@@ -0,0 +1,33 @@
++package com.android.systemui.keyguard.ui.view
++
++import kotlin.math.hypot
++import kotlin.math.sin
++
++/** Time-based flight, with the entire head and trail outside both screen edges. */
++object SkyMeteor {
++    const val duration = 3.2
++    private const val interval = 12.0
++    fun cycle(seconds: Double): Int = ((seconds - 8).coerceAtLeast(0.0) / interval).toInt()
++    fun age(seconds: Double, index: Int): Double? {
++        if (seconds < 8 || index >= 1 + cycle(seconds) % 2) return null
++        val age = (seconds - 8) % interval - index * .8
++        return age.takeIf { it in 0.0..duration }
++    }
++    data class Flight(val x: Float, val y: Float, val tailX: Float, val tailY: Float, val opacity: Float)
++    fun flight(width: Float, height: Float, age: Double, seed: Float, reverse: Boolean): Flight {
++        val tail = width * .18f
++        val margin = tail + width * .02f
++        val startX = if (reverse) width + margin else -margin
++        val endX = if (reverse) -margin else width + margin
++        val startY = height * (.035f + seed * .26f)
++        val endY = startY + height * (.24f + seed * .10f)
++        val dx = endX - startX
++        val dy = endY - startY
++        val length = hypot(dx, dy)
++        val progress = (age / duration).coerceIn(0.0, 1.0).toFloat()
++        val x = startX + dx * progress
++        val y = startY + dy * progress
++        return Flight(x, y, x - dx / length * tail, y - dy / length * tail,
++            sin(progress * Math.PI).toFloat().coerceAtLeast(0f))
++    }
++}
+--- /dev/null
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/GtosAmbientSky.kt
+@@ -0,0 +1,155 @@
++package com.android.systemui.keyguard.ui.view
++
++import android.content.Context
++import android.graphics.*
++import android.net.Uri
++import android.os.SystemClock
++import android.view.View
++import java.util.concurrent.Executors
++import kotlin.math.*
++
++/** Sparse AOD counterpart of Home. Provider I/O stays off the SystemUI/UI thread. */
++internal class GtosAmbientSky(private val context: Context) {
++    private data class State(val latitude: Double, val longitude: Double, val epoch: Long)
++    @Volatile private var state: State? = null
++    @Volatile private var loading = false
++    private var lastRequest = -60_000L
++    private var generation = 0
++    private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
++    private val path = Path()
++    private val rect = RectF()
++    private var moonBitmap: Bitmap? = null
++    private var moonKey = ""
++    private var minuteKey = -1L
++    private var sun: SkyAstronomy.Body? = null
++    private var moon: SkyAstronomy.Moon? = null
++    private val stars = java.util.Random(6739L).let { random ->
++        Array(70) { floatArrayOf(random.nextFloat(), random.nextFloat() * .8f,
++            .6f + random.nextFloat(), random.nextFloat() * 6.283f, .35f + random.nextFloat() * .5f) }
++    }
++
++    fun cancel() { generation++; lastRequest = -60_000L }
++    fun refresh(view: View) {
++        val elapsed = SystemClock.elapsedRealtime()
++        if (loading || elapsed - lastRequest < 60_000L) return
++        lastRequest = elapsed; loading = true
++        val token = generation
++        worker.execute {
++            val result = runCatching {
++                context.contentResolver.query(Uri.parse("content://dev.gtos.launcher.sky-state/state"),
++                    null, null, null, null)?.use { cursor ->
++                    if (!cursor.moveToFirst()) null else {
++                        val lat = cursor.getDouble(0); val lon = cursor.getDouble(1)
++                        if (!lat.isFinite() || !lon.isFinite() || lat !in -90.0..90.0 || lon !in -180.0..180.0) null
++                        else State(lat, lon, cursor.getLong(2))
++                    }
++                }
++            }.getOrNull()
++            view.post {
++                loading = false
++                if (token == generation && result != null) {
++                    state = result; minuteKey = -1L
++                    view.invalidate()
++                }
++            }
++        }
++    }
++
++    fun draw(canvas: Canvas, w: Float, h: Float, brightness: Float) {
++        if (w <= 0 || h <= 0) return
++        val now = System.currentTimeMillis()
++        val data = state
++        if (data != null && minuteKey != now / 60_000) {
++            minuteKey = now / 60_000
++            sun = SkyAstronomy.sun(now, data.latitude, data.longitude)
++            moon = SkyAstronomy.moon(now, data.latitude, data.longitude)
++        }
++        val isDay = sun?.let { it.altitude > 0 } ?: (java.time.LocalTime.now().hour in 6..19)
++        val t = (SystemClock.elapsedRealtimeNanos() - (data?.epoch ?: 0L)) / 1_000_000_000.0
++        paint.reset(); paint.isAntiAlias = true
++        val body = if (isDay) sun else moon?.position
++        if (body != null && body.altitude > 0) {
++            val x = w * (.12f + .76f * (1 - sin(body.azimuth * PI / 180).toFloat()) / 2)
++            val y = h * (.43f - body.altitude.toFloat().coerceIn(0f, 90f) / 90f * .32f)
++            val radius = w * if (isDay) .045f else .027f
++            val fade = (body.altitude / 3).coerceIn(0.0, 1.0).toFloat() * brightness
++            if (isDay) {
++                // Small bounded halo, with no full-screen ambient illumination.
++                paint.shader = RadialGradient(x, y, radius * 1.6f,
++                    intArrayOf(0x60FFE2AE, 0x00FFE2AE), null, Shader.TileMode.CLAMP)
++                paint.alpha = (fade * 255).toInt()
++                canvas.drawCircle(x, y, radius * 1.6f, paint)
++                paint.shader = null; paint.color = 0xFFFFE7BB.toInt(); paint.alpha = (fade * 255).toInt()
++                canvas.drawCircle(x, y, radius, paint)
++            } else moon?.let { drawMoon(canvas, x, y, radius, it, fade) }
++        }
++        val scale = w / 540f
++        if (isDay) {
++            if (t > 20 && (t - 20) % 50 < 10) {
++                val q = ((t - 20) % 50 / 10).toFloat()
++                val x = w * (-.05f + q * 1.1f); val y = h * (.65f - q * .4f)
++                paint.shader = LinearGradient(x - 90 * scale, y + 33 * scale, x, y,
++                    intArrayOf(0x00FFFFFF, 0xA6FFFFFF.toInt()), null, Shader.TileMode.CLAMP)
++                paint.alpha = (brightness * 255).toInt(); paint.strokeWidth = scale
++                canvas.drawLine(x - 90 * scale, y + 33 * scale, x, y, paint)
++                paint.shader = null; paint.color = Color.WHITE; paint.alpha = (brightness * 230).toInt()
++                path.reset(); path.moveTo(x + 5 * scale, y - 2 * scale); path.lineTo(x - 6 * scale, y - 2 * scale)
++                path.lineTo(x - scale, y + scale); path.lineTo(x - 2 * scale, y + 6 * scale)
++                path.lineTo(x + scale, y); path.close(); canvas.drawPath(path, paint)
++            }
++            return
++        }
++        paint.shader = null; paint.color = 0xFFF0F8FF.toInt()
++        for (star in stars) {
++            val twinkle = (.25 + .3 * sin(t * star[4] + star[3])).coerceAtLeast(.035)
++            paint.alpha = (twinkle * brightness * 255).toInt()
++            canvas.drawCircle(star[0] * w, star[1] * h, star[2] * scale, paint)
++        }
++        val cycle = SkyMeteor.cycle(t)
++        for (i in 0 until 1 + cycle % 2) {
++            val age = SkyMeteor.age(t, i) ?: continue
++            val star = stars[(cycle + i) % stars.size]
++            val flight = SkyMeteor.flight(w, h, age, star[0], (cycle + i) % 3 == 2)
++            val alpha = (flight.opacity * brightness * 230).toInt().coerceIn(0, 255)
++            paint.alpha = 255; paint.style = Paint.Style.STROKE; paint.strokeCap = Paint.Cap.ROUND
++            paint.shader = LinearGradient(flight.tailX, flight.tailY, flight.x, flight.y,
++                intArrayOf(0x00DDEEFF, (alpha shl 24) or 0xEAF4FF), null, Shader.TileMode.CLAMP)
++            paint.strokeWidth = 1.4f * scale
++            canvas.drawLine(flight.tailX, flight.tailY, flight.x, flight.y, paint)
++            paint.shader = null; paint.style = Paint.Style.FILL
++            paint.color = (alpha shl 24) or 0xF5FAFF
++            canvas.drawCircle(flight.x, flight.y, 1.15f * scale, paint)
++        }
++    }
++
++    private fun drawMoon(canvas: Canvas, x: Float, y: Float, radius: Float, moon: SkyAstronomy.Moon, opacity: Float) {
++        // Match Home's sphere lighting, terminator and restrained lunar texture.
++        if (moon.fraction < .002) return
++        val key = "${(moon.fraction * 10000).toInt()}:${(moon.limbAngle * 1000).toInt()}"
++        if (moonKey != key) {
++            moonKey = key
++            val size = 128; val pixels = IntArray(size * size)
++            val zLight = 2 * moon.fraction - 1
++            val lateral = sqrt((1 - zLight * zLight).coerceAtLeast(0.0))
++            val lx = sin(moon.limbAngle) * lateral; val ly = -cos(moon.limbAngle) * lateral
++            for (j in 0 until size) for (i in 0 until size) {
++                val nx = (i + .5 - size / 2) / (size / 2); val ny = (j + .5 - size / 2) / (size / 2)
++                val r2 = nx * nx + ny * ny
++                if (r2 >= 1) continue
++                val nz = sqrt(1 - r2)
++                val light = (nx * lx + ny * ly + nz * zLight).coerceAtLeast(0.0)
++                val texture = .94 + .025 * sin(nx * 4 + ny * 7) + .035 * cos(nx * 10 - ny * 3)
++                val value = ((.025 + .975 * sqrt(light)) * texture * 240).toInt().coerceIn(0, 255)
++                val alpha = ((1 - sqrt(r2)) * size).coerceIn(0.0, 1.0) * 255 * if (light > 0) 1.0 else .16
++                pixels[j * size + i] = Color.argb(alpha.toInt(), value, value, (value * 1.025).toInt().coerceAtMost(255))
++            }
++            moonBitmap?.recycle()
++            moonBitmap = Bitmap.createBitmap(pixels, size, size, Bitmap.Config.ARGB_8888)
++        }
++        paint.shader = null; paint.alpha = (opacity * 255).toInt()
++        rect.set(x - radius, y - radius, x + radius, y + radius)
++        moonBitmap?.let { canvas.drawBitmap(it, null, rect, paint) }
++    }
++
++    companion object { private val worker = Executors.newSingleThreadExecutor() }
++}
+diff --git a/packages/SystemUI/res/drawable-nodpi/gtos_analog_dial.png b/packages/SystemUI/res/drawable-nodpi/gtos_analog_dial.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..8b19f63e18b9a0db8b9ebbc85bb2037ead84d1fd
+GIT binary patch
+literal 15305
+zcmaL8c|287_c*-Iy~dDaCP|{q%1ohzGDl_RW-jwQbD|_;DKZre$aqPn4EH8OAv72=
+z-jI3BJpZ<y=l#C#_xH#9$Nk*1*IvWkYwxr6+H0NlP)|pl?hwZz007<9E0^^Fz!DFB
+zRAdmMH{5#!{;_+h8hIJG+Ijij@~{OLZCtHvPh54rWpAr*d&|b({fq5+02CarUcPwU
+zuWxQ}*PmClTZW`U7D?5qhDHKsGTxKQm*E2=l1jCB8RZWv<5i9$mGBbda2ZNYy?5FB
+zZwz(~-WXi3?U`@fu1TdAHYF70dFlkO4Fk}$mI5dMLJKf#;0O_%K#~8u@x!EXd@7?n
+zba%L%duQKuWcfH@TP0m-Bh);2MR%fdodpFEa{VDIgxyzVZ<MUJro;8>{wCc85#3H!
+z%rizxs&n#nPAkKsqAnS)Hl$rf_gwRDD+3kg{C=f<(~b{5m1TdsDEG<9#A7(B@_QTP
+zyCvuco+{VH_RBWc%2FV-Dn`xn<tJqX;_xHVF2Qn;l+ZcYAYb>l@v{$Og*!{r36!VH
+zddy{n(=y7cXmp3E84ifPz>2ZIw;}si)SsIJjdJboSy*;5aVx{wD61nx@hBzho-Zz3
+zE_?r4t*i6W(k0&IrX@3#QJ!YTjJ)Wr!`&sZg{v-}jwAV%`bx1N!YAB!CaB_;uRC8P
+z1M!3(L&FL5H*bD#lg?thVx(?61nNaQJ6TV}_+E4wVKQtAIDy_0oXL^G|7vSpS$u!I
+zZZ%68eDZS~GIuKU_cx(eqBu*1V`~%iDT#e9C6-}CpD`k+)BXUm>6Z5?Nn1S<`+&fI
+zad6+6|9VE^;97X-P{TAnG<6x<=AAxbW6FWh?mAn^ygr&gLw{-2{m|cC8(ubUUVr8^
+z`uYITcv%_us3*UZsBn`UN49&V25x%oGQEpu=x@)$#y_rk*!4rHjI+hpJxcRz42bYo
+zUoaooTg}-16+Gz*myEFYqfdc1f`KTWKUw>5yE1B9wnN;_0OQXH=bQI<6geP@c)iZk
+z?j8qwO>Gsq50<DTN_&;u!io){4c*=tYJAx@8B9CapELPKD*kLuk$lX;$Xk65r0u&>
+zfv@{p51M8Ec6Y}tQybfwqLp)>(`2VP)j;Xx>fYwGmOY&wUB^KoS6%o19B+4Lsjh|5
+zb2>xE$;4ZWAFAB=QQ$IiY@*WRoNV7VAy)fF{>TH_#&6s4z^?sf34Z+j`n-Top-+w(
+zvyz&-$S^~5<$JzZU>9=dmq*>heA#N19Ko61rtE|nDW|KvXi8V}jN;l8yhqWfVA1t+
+zhR)1sy-hxUJx8i5V>II(sBi^=nq&)!6|V&P4~6xbupu$tcoK6%cRdyE%69L0t@8O=
+z|3gE8uAiI=UWEDONsO$!ubg=RviIU!a;MX|;hIL}+c|Uf_cr<@ut-aNr^4m!`PC%9
+zA@mI5H6^;ZzR|l!(Zu^v;ilikMt{?tF7PjWkYhw|*?gbwHkr7TQKP7++K^XWw1HW!
+z9^c86J|$ec#|x_~#nquE-#b1EKBi`Vx7TI-N7HapNaX87kmkp|1=S##J1Z6+F2xxV
+zgnUc5r6PvqnALzpw!3bSs+f0kvB51e@z=fae&P7ZtVFiDht_6WuXs^*(V%9*ilepf
+zSwH!@^W0+~J}r;>bS0c`VdP8z`-up8-r#+Urfb2Hm}HON3TlPR=IJB)_a(xAHH18k
+z$a)}q2r_lPx1f?f@&^Cx+N_mKeS<Vl49MPEtc}y;rDNL-3}oH@D71NB9Fwf^spp2P
+zmSc>N#6hd2e*L+Ky<kc7Ad%Ph9s~&1_msK(+z3`$kxIS9hP1u;y)7!LP5a8EznA_4
+z3k%e};*?eAV%dD7$;R1xVk48SF<@NxlTKv-_p|oE+byDNOLoNOYmB8wh?g5g<HGMR
+zsF*cfdoH1E(#*3KK6hxa@uPJvSd%h($KxvHVJkOh+UP<Y<f%AAjbqsk3O(lZWG?tv
+zaIyGn%C1kSk`QI!WlXZ|g&uCoytSanCp0Z7f3P!+IIQq+<423fz>fX5!u8U}fw<)T
+zj&|`UrIH71aBl<by`OKe|CP80#@SU8&CHvxT{s>6F8Y(Ql4i?0GV#*Vxaf;I!NEAv
+z-SPt8yfb9tp6A-03UM>}6?2VzT;qvz{~axa-X0bYm%b-P%U)06O@&L{cc?sud!n^b
+z&&CtP6{vI@lgv^$azu&R(n0=SX!na#=<TmZI6LZDo9J()eZwSYE0VRio~N-)7QN@J
+zMuSUryB0KRyivcxvs2pQfM|U!cQ^KffJ-7gL9Bu1>zHJYL;~*P1(8mfdz!;?<0BM^
+zmiL;wu>74*_k_;8UTG+JAe+oCg62*LR6Bj^(mr-ijEU~Ib<m9!#Q0hg$i_UVJX5*m
+z%}Yc3dR9b(-km|+@;cJyCGBp!Sk*^n!gljl?yO8ne5qI-uuJ70PoPtG9lhjEN$bSS
+zx}@@PSl2TFWG|KB1MJy!fAu-c;1I1+M@v3K@w#`m#@!z=$>ZI192_`#zBJ0haB^|&
+z!r;MD%n!l9lTKX1=xwXH{P-i&dhg<g<&A(uq{@!|q_0OU`_HVg)t5@s^en`mTQN?f
+z?9-)DDkY<Q+oqUgtCqw&8z1lSop%tzGZC5mMeBrro^^mIhAt9Y!LxJT)VL2qz65-%
+zy~CfE)j#dtZ$qiixoD)$m^ELtJtb+w*nBDNo9ig4RRH}`8fWl0iPtw<IZb2G(}z(Z
+zksFijmDN&|j=5N^aRWW`<tXvgeka#xHHHxXO31-7_Z75)i{hfF|1W+W)sO)*Q7TXW
+zQ(_WDe?@)nTqG0k5R#bFnB#5J%nhM3fZL_x{6v!6LdhEW3~Aym4FfUgO<Q+qb?`^|
+z4cqcp<l>>F@s`mA!Sr=c#T{+4u|ar26To;aZ~9l2m=R@;0ka4y;MI)xv^4sz68LZ#
+z=SxXLy5HYuyKtAYyAH=S(5N!|_0SQb=8X}_X0@Zj-dtuQiyD6-fyEeoNA7yDcL%=M
+ziEpj5$a;du0*GCGn9Zvst^82kKlUod@1lkzSBeAnyx`f3y4DH6;$G{}gmfP3UHZhy
+zY(LgO%PYuvd%p7M_s0<K(DD^mZI1#z)PDDA-};#0FXqMcJw9WdaPmd1xzXO`2cMP&
+z7XQjuE*$SyIhIaAL#nEZ%m~;!tkis8jF(iZ2A(Wm@2j}A$K#W2j$AEwpRVe+BgTUl
+z+B+7j1-kE7X~%-6R|cc%9v13yAp;+@%~pe0%DBkJW~!NYkC>7hV=8Tf^N%`Tz?!cP
+zMs<7hpq$;lBZ-Cfnelt3-}r5)N&KtN{r)5!%_P)S6s0`kL(>B1Yhq+Bgwz&tXFjb{
+zzqMfPDy9P}7zw-6FTMs)XiO^znP|TUF5{-P!^Eq)Y08_n7YXKaDuU#0j7$CaxzAGJ
+zMDZ<i)3+j5fnky5U}-il?n*G{lb@GqNGVMV+Os3wtPE_O@;bFT;i|=;NS|O8dYV9F
+z+j>Fa_=t(vHPy4~IB-h*MToVaH&jR7i!<8;K4W{@IH%qD)4rw&pol+Y+iN#Zm@K;!
+zZ>?fq3|tgLf*G-jwPfO4EBR;M$6~cOKL*Ejc)3uKs8{>zulbQ{;dL)2@k$~CHapYV
+z*y&FDu)9<&#Mnl>t1)pR1+WmGudq*!7x8A+QO$=~Ch&Z~_+1W`cDjBTBQ<TvIH#u#
+z47mx@FYX5LR_bcMhop(k3q!0&-u7m}XU`Z*nO)54jHhEUY~5(WyJ`_nb7B0(Ts5S^
+zlr^_j{3CIQ*^Qm)1Z>~;90?;b8j{Ayx~R_xtAlu$?$QB^xh8y(W#)}w`2&rx5Wq<z
+zASM!mw>}+mw~2RyX&5pXxVgje0clfN|9uShMq2^~VYE>UrBeIv^Gr$X{>Dx0nRmjQ
+z6~-t=_QpE9_z3HfkNY;qGylu-KSciT;z~Ej*-nMYxX-knMwJSoue3xHN$O$i5c<cF
+zg*d{h3<pU*(`O?Zf-t0iDn5w_hai`W!He#*Ax8+{wd!KO?8XQ+X?|FFgq3*uEm-@C
+zB^g`?71oS|?ItAoR2acx&8fha(ygcD$ssDB__Oel_wP}GXUB;7vdzy%SaI*D>Y~4T
+zREIs|B$`vYMp~jC3^k;W$6Dz~1~m)>@I-xayO$a_%#W{%E6fl_?adoylB6*ke1n2(
+zTH@q>#yy{EReh3#&!WCdX&dBk1;YrjPr!?6mqPXEqMz8$Q6y0=ej2B%CMEzsQm(Qi
+zT4P9uyLZ1`rQlgvr}0hT+s^@|SYKYOkK0OOCJx@o*yl0~Nd@nmMwPfix?WAce8xm%
+zT{3uJX*(^U%sRNG9TG=_%$o9?9BG!_62MH39U&O4QIT9G7{)D-m2ZDYu4lbvS|LDn
+z3C=Ex%HqoC#5qi5tD9uF4A2lpKX_#bTP-deg`nkU8|2C7!dQzb<@Uk6eo)pjYi7F3
+z4cSt$rqn>-I<kJ4FzvWRLn<`_zCDE-8WUp5x6OTc?JZ)Y77p;sGWp$525<HV$r-Bx
+zIm*SeA)oi8OyWVr_pDQE&d12y96t<f<*%{hWCy2T+6Njenqez7zYdNR)nnK$gt;mN
+zNq4*#vweXK{1MQcVNibF`Z{G^r(FWAPM3HaOu?q|EMU^Od!p?uT3u6hCj)8vo^?DR
+zBKplHx!W_Jh4qqUMnpW-pytb-R4Hfc*$Oa!E<j~Yg4mnUwV5dYA5eQ}UO=Swz}9WR
+zcH@~<LCW0Cb|I90NplUq>1(!m6|fCT?>*Ud42gLSikAJS*KG+Ypwv?G>*OgvML4V#
+z!zE_o)4%a__FhNNXMpyF-5WvV;;Y{U2yBkh7e0DYlXiwIpWs1uPZpaa|AmjsR3z{8
+z(qZDSxOEB#jlC{8i7AT|b&ye7A#NA+ky+XLuULHT!&u<5T$r}X+yTB;MY$$b#N1Ir
+zmleL4DNyM>6YXJ=R%(2?3g*8D*{o0~Z%5~jb0(P3lXi}uTR)EcJhLD7rpaFJJr{BF
+ztGZ4oawjqL=zy1sek+nb95lAVnrX3l`lGhYsj_3l%?^zNgd~WtSZ7y_q$@S_Pl+kd
+z{nZUitG%An1=<OlpCN$eudfVeEl(~4JP-Z@S<pcivF(j_B+%uGGg=`O4yt=zll<{)
+zrnID;Ir}FWh)IHyRpm$LNfxZE@Aj`+0&xC9IDG(E!^nniZ#u5;VI=uO@ugMHlie8E
+zeUaPc%3Qc_f77%%O<l@Zh*kX^sqw%hvH#J}UTH5=B)xjKV3R7-e3R~~wzEnF6LIrD
+z2uZ__es)TGX&xZ#h_2NIBB?&?!?v|`FP$fSFi>>WW_~IXc_V$awZQV5)|9glk{-I6
+znHCSmPpn70u`4>`#D{u1{%)(oBu5Wa8O5#;-ZK!lH>74(%QKL1-cZi1?Mf!1ZQV)*
+zY_kZ5a(=kW|C0qHTS3vjCP5q+b5W7$q%;Tx6N>A-Ar#54``er+r`Ipd(35@ze?i!6
+z<;q!z!DBxAeXuisz<IKT(x97*II}@$o8ap20G^4Kbi4Reg|L~!q=9+M14vReow>KV
+z+gBuA;a>lNj6W_ahCu?lwQ!DIxNUaap50TrRSGwk&BT04B<X~&@B2Re0u!uk#m;o_
+zY>**FxL#n$rnc_;KOlZ5@8L^p!1P!lvl2q&;c|q(OzG!F&XA4}AXbY?3xv6D-QZ=_
+zMf9|W6mKUQl-!{u4gAf=kIn`%;I2t81$NH}2{-16p*`;Hef{{LpKO3xxcj)3fvLdF
+zU?kmlGjrY&wQZTBDw+?g?}J)zONM}~7LndUCo^|vh*40qa|rh(wLJ!&Ron!-+PdjL
+zQNU(2-<iEIst-an=0ocK3ZYr8LXCNOE^o7e%SI~|nq`^~bzq{k$qcHpjF@9Zi%z4<
+zeeq8%k;OB3ru<Z&HzpX_^%Lf>U;FeG5h$kWC$#i&Skf10W&FJPSbMt}i2kE8W{OnA
+z2Ojy6d2C;<se_5RVZ*Lwa%J+r<5#X<Q@^ePCT<iDHZ=KifPJ?({5cEri>I~eAh&H-
+z+tTyM+e<^Y?8s%vbh(NC{S=AEo@4c%*LVzliI>QsC)KRt*LZ=V2%hWqU#Z2PNV-gj
+z{x$>XXmwQIIvWSihnjl#Id#y+e<K?{uj2dTL9%v{7CX^jSCIL70isu%-ty{d57B_a
+zZOAifi4)X_;w$Xxr53%A^ol*H5G*Pw$1BHghSg;y`p;O7%780RWD>03NiAMKK=9rc
+z15+L@Y{^b^=WhVheN6GB)S~2nNROiD<*Wrxn_zVr|B;?XK0lF3@<@<cWI8|yW(^#^
+z3T!^aEKFNqbs31=1RxwjcRu8R3y$vm#sB^X{9o;hU}8Z3)-Dav&yn=lb&yjAU7mki
+zyhn~}lUjVcJ|D|@z{m(2fBZlHx<`m|GLk0y81X$0zlQ#aW*SmWwLn2Al59nHzHc{h
+zl-#X-E(Vfll~Np^qu46J$S!Pt+G0gh>^qH+^yQTUQL_dP>7aa%oXFu92HM$`<@)9o
+z08N6yL&+Asma~uo6Y*`j0~kF@w@AMxYRATldQ!L<L7BT8e)sMkvnF$E2Q99nV}WES
+zGCNW+))OcG)MEp*8?VF%F_MGmgwhkoc9gv~K#|iIdZN`0?^E(#V1g+GYC^Ar!;fV5
+z<|S4(XVw4dJ6FIWoFn2xx_j&sg_{oc`x(_?AZ(&qCFumXN1mCykOU|G`q+iWSmz^V
+z-z*fsW!18)D*rIIdpC;!jx5LT$xa`V_Beu;q_M}0WY+!p?S>Q})TsOocV&4qF!3~i
+zlZX)gJSaS9yH6^ZfgB}E2W1RSOYZBH@VRe?nTc||_~E9HzF5F3-$eff&o!Bv`4S_W
+z12nNm!Dvga0ms`Tj>({iWJwF|Se!Y`NR%Ttasd>$AUXA{a3(7{M&cB?5yvBt+|*z!
+zbs0>Yzd<W+&j?;5dRl%2)nzJBS#?{i2M7&<dsjl{z^cX{tn7s4XSypu>-2=(n-Q9(
+zzesxN8ySQHof^}+FB)QFqKGo%kj^M-iF~gEmtg7zKRBV;UNqO^UL=Q}9@M2og&Dg=
+z5)YHM$CkPe6@z4pt@<UNo6v~qP!>}g0WH^eV}hK-DJ~-He5(?`bMu=EDFI4(qS#B`
+z3?A`K?1hDOY4X8kNNQug2Y&KQP!JYI-!%cnX2Xa0nz%yWW2lB%qYQk0s2z-)|HeoL
+zR^G>3KCv`)qO5>wbX8VrFrgF&T}F-09*oW<Jo<kyvb9lK5afMzfkL#q(LfOORMVRV
+z6q%xOgT(u4`bmdK);r>BrC7l9q%MA2`mhxF;$)~hIODK#-zEjL|3XEB(#XL3WE)#d
+zFNGv1<n$M-&;mL8S%V0z^7HTgx1)vmHK9J=4N_@<>8BEUc|?A%hd^f-6_u^00f#iX
+zbIov!A1;G_lmd5HZSdYaH&HqhNq%rm=H)hJF`WY#w`$Oy+(VqO9B37rJL3n}f2fLT
+z1NY`R4;;P`A!lW*9$`g$GGo-L1?cQY_n{P-Aya9c7g&>aF|zi#E|7F9Hpyuh<M)1o
+z46uE<5?H;9*$}K_9~GkpudiB~Sv32k0*glOQQ;p5PEszd)3RZg38{&<WVE~uiGAL<
+zUJB)YW<a)R8}w|W<waH>5P!A8((hZ6aS~k^U2ZUBsVt`kY6*%q(>ymvDHox$w9#^s
+zl@&{L_}(nMuTa!<n6#qFc4#1#3h;99jDDbW+hSO)aQ|z8>3n3qleE#&Zrfyzm94!}
+z-Ml9Yv`*Ew=UTsZ?g2Wk7X!Ez7I;CdTw_{;p^ua5GzT$!zY*Xrg^Nj6Q!J7+Jwb9O
+zNxg6oE+zRFT4B)l)WT^XmpRuI<aAJ-#nPbCbm`u(cQ=>#uUC;i|A&j~GoV8tze;ly
+z%xU0#r`?3~A;49)JB&=Z`ny7id`$ZEQQ}m^iQ5-3ndVc4SGZhM4*<M*Whao%qLrI(
+z4)+}X11Djr4p}&BipjTIc#Ok#*nr3t@Lpv1=9^iSo*kg0g!udiL7`odyq%u3!bm!-
+z`U~hiUTNx|H6RTfVAR2#dl+qk_l1Y}w)5oebPx-tat3j*+){37`!CYGWGV;9O9<K3
+z8y9eM0XZ2Uble<^qtFjOx6C9fhCT<_VoB_C%mjHcBMv0lWg3ubfDeY2_?_14P&z9d
+zdR02WinHckOOXnbJB|M6e+)^)xu<f7?7VM1FtWiXo<YKK-d!eHYbsA2xP{3N2>v0^
+zbf$yjHq?hfBIg*D^l6k*?j8j?O{aG+{Wvjg<HAznJVJr9_`X2CCl5o{8%GGI>dtNJ
+zTY<MGTPO0kM~&ps9}nDYEIyNgL{09-^z$*i7f^$BLMi?fWRqo~_SB3rk%KtJj9ajt
+z2*%*-be8y+5+6QS&PC2&p=Sb;uQr5Zegf%xSd>qw?ua&2P*#N_8%Tcr^Hpxc>)xM0
+zG-QJoXbYIdq_YsG_>7Ewc`(Wn-}~L4v=o1bQ=3qzLfAoSg5o2=Tn<4I^oM3~g1Q@`
+zZ17$E-08$yS>(k>g~1t<h(s1*E}s#5k2s=it&jhsE%-@;hV-+|m;NYNP7FD%UmxP8
+z0fatc(0W@V0mQ6wo(7~|_qv#Rl&Jb_0CX0FslO9I(gP-)4zYmcBzZcamuKYoP=n<m
+zCSfox63o$^A6Sp4T$JAvTcY=5;DI=b$<vnZ{W9o}`1C{^BJN5qv9t<Alh;7!`><+=
+z>o(2S^1#U79wb+7Z=9d<#>c%5x`5K$3__Ggqr53<j}x2pFvN_guT6e%TE5k>FUfFw
+z-*Z&z^x0QUK>l3{6!BOp13LJ-dne~>#X#EtH0VKpguFZP<Zjb#^irKbSmh4aiqJBT
+zC7kLVv44P<HbEk&fu{wXBxrqPLb=;AwCISW_uaEOd;qZES~Xq=H?ede+-9^Dsfivw
+zx_`to6ETWdp=KX$%5?;+CU#h243pf8U^&zv?UBWEKWb3=I6$*LI`)bfWikILz;=qu
+z@-XQq|EU9c>eI;FzaF<~(TZp`U=+7P!>%~PLQH)GaG62Ej6}=kU)u=rlGDigEvyma
+zQ4pkYSMAMFB#6~<fgI3ya9SQ_{}1v#VFn_8z>f+@JduB!XANdB6sWF1C-sg#$T@x%
+z+OQ!Sz+%Hq;II2zx&uV@ZRmi+^~`JQo1mMV7KDrFXV8-{t&Si$cc}S&2W9cuW1v$8
+z%@DZ`&GH8nF?#Xy=HOw(iIx)3CME1*H=K{v&;#MNvmtDPC{0@x8JaR3Y+1hyH$lyg
+z^|9K6KAw=PL4WL3$Pai4>u$Y|X@fR8mRuZQWED<tQ!cW)F9ZYJt(!~D;s?6i5-CJ*
+z-2unD6j_PmI7Im&2+1~m>k2qOA;fd5>G%0iB=Z%Jjywu9$QC88{*pnze#GEX0_K@%
+zaNzA3XpTK$ny?nT!E;j%NjEXubxyCL1j2e957~pUy(ct4QtpK0q%Nh~0%8jDh#5g1
+z4$C=M*<G1k`Su|!U~yn1tQ!}s(c!|+AVzr>&1Ep-NG1-1<<P)2X@rPbNlp1ChH8gV
+z;Hm<&W10TtB9#G@%_fB!gto%l_9`XrrOs0Jwnv#IsHUMt|4f%z3ZsZJz@jj2b&$Kn
+z%_9Sjl`MdYL?7hg2E|wQ_}vCZ_bd!qsd4|wZ$kZ09Xvwm$p0q(C+uGi^#6l%4zn>M
+z`;3mHyAuJ5kK}KBI>ZL1%@H`P{~Hs|g$idG3doB8n@}}67#GZ~{znS&9CkxdQFn_j
+zG>!&hu}q%~(Fhn+DbUBl^OAuG^iH98YoY%&8)cw00q<P9h|ybv8UZe1?Kv*M^0FtS
+z<o^|*oQUjv`E3G<scI=?LgmrG*k=@|>ZG^#<NxBwHuku$9R|h9X&bdcFaQ*<NDu&R
+z7F$-U(UrP%q!+Ds;6(OY`*ioX11T2a!Fe3wR&O{*g88m~GEmy%Y1ib5%wD<#&M*)=
+zv<}v#69>{L=-{5wYMH?FdeZ{ElW4{-A-Dpthf|H3crHtN){dh1cIUqycH=H3R7nm;
+z1MCXdJIA5J!Nvz#e<++*+FnrBbcEuUX0JK#gT1qHLzIAJ{0M=TnOL!8``y)vg$1-e
+z=@ao{oq^}soNE9l<pLJac*bxiSgg<1#6VU|ln1Q%GU#!o#URraC<W^EE1|I?0Oudj
+z{xLuRU0=!v6sQHV6Kpn4;TG`V2ULd+C_eG;bm`D(^;1M?cE*9YCOJ!P#;z~%j}&Or
+zziZw14D)Zbz8<hL)~8A2w(5cgSF>QaaVQWWhM6__Ud0E#yisu(%#cywj1Qd}(?kXW
+z+xZTtw~uO&73;vmGHabJ?itqTv^WSVxboU11$0x>5<Qr{G<WQoT0Pu_?=d$JZus{e
+z)2P3P1`HBy<Y3H+c=BSk|FLCiqiMZ<O28=6GbnN811sf?+G9kH$AFY^NRp?Pg;>2I
+zvP8dWI1r!?j8N|#%Ml?$tU(XxjwCxUqxSn;w^Hap>9t9}HE6D#FCQq88qm1?Q=%2)
+z_Zg&sff`U;Y3jkqmN85vrc<IRR|YvlN~ot+p*J~oVBUrP$Gmr4gF};d0Bk2%p;=#X
+zIn8<wh=)$Go~=2@Gg@l69iz|r_~%8ecxbLvC%!!r9w`Q=E%L%CaC=eSl<-i2SCkd?
+z+=I5hW9D#kkt@jQxtK;tN36**RI8Qe`MU~kQqqCO|8-hr@G;5dbYCQ#TgC#8XY$;C
+zyErD_1D(Q+4-aG4DNuHyUiPO)iH!j-K;~_7d+Rr3Zd*U;ZH+*iVF2~bdaut<f#?<`
+zM)`G==oKYR6Kzg)YM>f#^8>RXU8l8$jeSjqtJ9B8Sg<k|L=Bp+34X%B_IkJ_mrBZU
+z;#6!iJR=myh_ucl>kWqdblDm-ILKSr{P&B@_Xn=+!_c?4p)7+frUJ2%y6Yh4*{zfa
+za^m?cosSxVA2sOzVVizCTCf6i#6F#)qd_;X;v+O_IK`#V=>3nN^U(;+x1R@n8fF1l
+zWtH#oR!=mFzhf&meoFw!H-2Y50w7PzeIb`x1JL&Q;EYfFGFLf;qz|ERR|nuh^5fv0
+z)Qy(0yVoI5F|76Z70{-+b>Yev-jpBE^~JV`9|q%mWrqc=In<#4W%22$8A1W*t}KwX
+zR3^!sM(IWY?jc3W{l|=OGZpSw0wDOT4(v+nsE{q5&~yWD2TrIL%OU4K^GJg0E{{%*
+z)c_strr%6#sQ(ouMCW+@V{WLY&pLPE?E?Ct1sAXT!*N8l3W$T{M<JMWsVF%y=%`&&
+zAg90`KkzHhy&3>MhiHijv|gBWZXzT!O1P_oE@OKkiRQUZYPS$Dk&a2DqEqhwuC8bM
+z0{BvsRt!incg=v_%N3rsl+#3W=y)^r))Eh#;^U+?Mv^F!9&%{b0tfn%6vO0}$tpDu
+zc-ZfIgG`Po&GuPFlFI=`dhH2H^v)aZ4|W;A7j9wRDR{E%A)U~~UJbH+@NN|Hv3R<B
+zL}-B<#D0kHV6^=8a;Y5hI;IiIWxsF&(DgMeJjBml_ZonX5v3>l6>8-)iuMnXxnin`
+z5Omr#hUezIcJ(UYC62WxicC51yXhnOZUt}XUABl9LNESwEqShWvu+PKz9U8f7&(Go
+z{*po|EmN_?dlX7{<~WFQ4}Q3)VlqXhcyr`gIenpb&v|kHaxzu>TsaTdJ?iJJ%Thq=
+z%x>RH9g!=$@G2HMa2{Sz9xGz=)t?(=z$*yzm;VRwN#qJ2yu$n!U|~04-L3jR7$%R0
+z9QvnNpv!a2oq70F-QQ-}0A0j^_|GPJJ5}$Wh1_?=ZZmSA(r;Xq*G<gUXh`X{AG967
+zw2aBSRT|Q_7mNVM^m=Y?4bD&BIjs}?6bruftF*BkzS}ZF{r4y`edIVhFFep%r6Z-g
+zn@hh$-kNSvcrBc5-NniV<H`<LCDkE=+pk_igAN7xv$<mr?ydLWZc!URMHz{ZCOMoz
+zCbN~S7-ILyOjCHJfO2X&<!!Y=RFs(rucWGb-+`Xlmeo5Vg;y@r{5{cPCrY$lP50e7
+z<ouQ=yk<*nS-9l>qiR*NyaMmv=~>(GywkzzJ%$&>oxV%zxmg(5iC@3XXKQ=F^|5nx
+znnAWD!2=#}Kh*6WnW<cN!RkG{G0-&e5HHfLV=9VzawHStH5X(+VsA743tmK8FAoM;
+zVirHd6|QssH)0?xt6yaUbpMhepjPXBxam36a7q2IBXj~5<N$MJWJZGJwrUkeb^=_0
+zD0ol%Nk^;9^}X6}sJUo>+f*9$+<NPU#fsN{Nyv8s>I0`)J!U8<Z~-uwL0=-cN%;(3
+ze?uR?QkVjr7j;(kf8V#Bf<dgSQ!Y4=ov3&@Z^Jnx3kF!kO?g<rk5uu}7D~7F9}R@j
+zmTG$9<?^MBu^yJ;G7)Yf<9rTQIpXR}5=79EDZV5OvJ*;i!hOhjIHQ&80u2}(hn#vg
+zwylWmB+6`s=n)>4-bn`SDfzcgvVhUnUxi#_dttYr{_GwiYh4J5S#DJ$e1IgQ1q>JA
+zCYKUpdT^leT^K^O0JzJ|8$6q3Sgyo_nA3xP`jYM#GNQvx_p~7IPF!RCCvrC(p6+$`
+zsci&(JUiMm)^k`Nm2v_Tvv@}}4DS3?;CpPh03D24-Z#p=gcXlVr|!i1Ow+Ox6L*9#
+z%E7Ilc(9cTs)}GID;4|w7FO22Jv;3&V6$kayAnQRC=NL>1srg4VE*&H7)f7$bJi$V
+z23)>u5j{&(C{>{>wmSu;uU&Kg-ua*Rg3zse7(_ggKu6`vKkeB@(38^bPC4Shw9)=y
+z#SAML?%QVdQ4j~8K3DNO+#~<ZhM09FaHIG0X0Ld~fOdf`>8D3gp0Q(*ao^b#)WAey
+zuqj;Bxh>zP<-P7Oz{dVXPXn+#QW+(48&W>3B7h_ZABtrrb`ycozRnS%fAs=<)GFQM
+zDm;3-2DIlYmBLMsy1L*{D+`014RUqwC@6?qzO!)cKi{IGC2q_NGc259gZYyPeG@2Y
+ze#`eKCv_7Y4vx7X^fc9f|EWpoFP}orF%^4Uw&0H!3`?I4ml6k~1)=Iy=&cq|{*P_K
+z!9Q+kW>^5z%fW^=;zM(&4>+*Y?LFs53!(Mi*z(N-?WR~l{PP7qa4vmBdvInr7sl#g
+z9CnZiv?&km20keW&4B@0sl~_&1JGHM&N+G7WM7B%V3NXqy9%~oqVTS()o9=$luWLo
+zL$`eI`8m|HhxmHv8lwFA@BCnz)2@Q^0g`%M76#@2Gw?y?_m*!TXg9~|Zlq(B897=K
+zZ^L8*-TA2}hd`I3;6YS;z&^3UeQ}qZC=s`$A~Z8R1raKSj5NTDCo&-(e_LKb0N&y&
+z1SpEw@7R#nO8ua8o9F1gau_Hk$%MQPYft6C_^}dfYx@3yBtm#c`ems}ku|x`)jYtW
+zu77jNjRA2z82EQS=Ae!tsrb*SCmyqdsevl>iN42RBco>RwML7-BQ>dJ#C`4xkbH5X
+zjLfY8#=Dm8$dF-SvLSBLe0FBTv4@dZrLe(#y%-U%s?kY}%8Q()CJmH4^)0y;MPBTd
+zFKhob;q9bJMk=QAw-_%-a+!l!8t!NM!l-Sl2qEuI++}klJ@9D}6V1O|2+WkYo_YX#
+z|Fj4Z^5#YFLO=!ARRI>_xj)@>H-3a%cLn&-^scx!kl^9p7W_fRrArTHT((tXH{{#v
+z7!ej*MuL59U45fTEaa?G44Gwpfy_v2!#81W1h)(Gzb<4(F)BL=t6PFJJ~J?}W6#OT
+zgb`MspB&Lxzv>7VV0>Cb^ce={=Fi%DQ{jDXH)t1Y{LVmIOjh;aY1dlIPflVLmxX*7
+zGVZGOOV1TdDE+C44PVekjTM^cjq!Lt-}mF7U8FJ3rHu`!{)rPR`k-Ale*k$$M<;Fx
+zGkJ-_DTcma;+fU2h=U~9+(e5ybI);Nl|hM<3bxH)e$6xS2fpvnzl_=EB*L!Qu1CQh
+zXs^xel$Ip!jJYTo`flRVU@pk34FYP$=I=|N&8)l+;-FDC#v4K@+%O$D+-$qMZ{kem
+z7NTD4?0{B%9t?3AOX$0a@#C`Z?*ueY3A;79RofM{FsZrwO<GcU`)@@?S`|;-a}X!n
+zY-o&k&7?Stvi@27IM9%t7+RKu@q^0UJ7ma&c`v-K{~{7UDvUmOq>%jX;UzDiC_tbt
+z`}_Ne2&LPev=?ug8wfg8v7hyFZUSaJVU{pu)DI{=G7aeex#k&-q!Z`{2TU=_5B}UV
+z=<jf*fHW)GPS44(k~YkSzcN<Ry7%}FQl}FqJxhQ|g2Hy*m)dp~Y-OwT`-oHM%`q8n
+zsfyhJ7ck+f;&=t)pc1ltExf<upX>t!mN98=DbqXscYv>eo~uVR26ydmJX@Nxw6hFa
+zeV(t1hdR@)3i7C}{^bECEU!(TVuMNG9Ku(#3$hje)Y$5O6O&xE6Z{oM)dxcd%dxT}
+zOs?lb??1tz9Dg$Q>f+5?_v;JcTyK2U2}7ozgl+}0rj^q(o6?g+T~i@eAB#a%4ne|5
+ztBjjyu9hT6P4V{X-qZrE8f^y;x;$Z(a+t33@438hzYIO$JR?s1c!^9uQrfJV8h>2{
+zbM+B#9`t@V&4#l|t8B4QmKqF_B!IZem<2e5z%T?Z$AW7^b#KS0WeCi<XYu4N9Y2RQ
+z{ps*<sM~aigIV~9HxUo~u##f?`p@lL72%f&zJU_4e?ao3J*EdKBB|rdMDub9CTk=H
+zuesFK7DqS1LNwP2V}^iT<L8z^Qm=mu`%}18Ji#>@0qd6G!t}1Gg@Z2<bc+=dK+}`Z
+zg>Oy)p%cf6<^f^$o8y=^o5zxAL&KYtZqI&@Ly}K3`ax1ZG@c*usOXit4^+hBT@Joo
+z@bZ`Jfgc?VnO=}27B8g{6y!$pJ;&i^B%+n6Q*u~k<_|w7+BW|7%0W&-FS=B)w68Vi
+zmc5-Ow#id`fiHXO%i|oGHKJu5rJS`TZ@|2Cl6Az~5KxRJccalYH%R~*O|Bu9Ef^o(
+z32x$G+%Dws^jqPYKf+g{3BT`XG&;$K%iDPFz0~y%Q)zlODd`ki_hI&8d(FljV`N~J
+z>=GF^hKmrLTW_oZe1)2#HqOR{gaLWE1~K?yiIvI4XN<(bRH8RIHl}LUxKsQMAGuq_
+z*GG||&50SOP~rX!-3OLsZ^H?;5Pavn`A6XYp=(gMVA}>VpA!^jpcN0=5uMlQ%_4W}
+zagDjp)QDv=n)JH8V@A4U?+;P3ap7{{`$$FWwc!}oU1nlvPocCf8J3oj5IrknYzKS`
+zA6PWFNuuo^X!p!#J6~r}xHSk2ZAc@@LARF`eOh-sMBom0c^ZjBJ(j9TpKAY5xb<jU
+zV4&3#3}GF-^==Hz_a&SPLo^x|>g|Pv6;NK7&Cap3za&Y__~4x+9MbR&UgKtD;;1MV
+z1q9LHWw1fUOca5swYs}NEqWN9OpT1h_z%oSB5}$);|8AvQB`qtgPCYBBcH57h8>Z4
+zp1XxHBEv>nBEn%v10Gns_fA*%+H~|Ix)J<K#c8DbnJ!Sm&-iID&_)hF8}a?^i6<+j
+zqBuhMFIC$E=;Or^^dYbHg*`6Ax*&{SjH{IPIB~~|>!ywI$^QyG$)*fb=$HQqUw%lM
+z=}p<hNIEm;Y^d!VBCVb5?Ul-$+nAGoVF<ApXitQYFP`Jw5cT2cygTkR!ekj`i46FV
+zr6Jh&tOWB31UAi#$rjq~BB>>@PvCq!AL53eqPp^Ai<gI!m72c6&&39KLKp}bzYqo|
+zSxUW%c@-HryCTIf`o08IuyEuIl#tGAWG}8~zvHv8#SAeo2j3xcwZe-~zir_cRcOX5
+z(nG(#!f{<x?)gWwLjp$GPH!fa-NOES)$uYF%G6d{>~R0BNu@P=GUO-$Q>i*5yL!e{
+zkC9F**K%<A-=}xifbJ&UK#qr=wj}9?CXo0dQzCK<cW5`R^I$OiVcSll=Nm3wWD(B`
+zJ{H)3AC*AN5*4unOg4!1w1J=P+agfZc{XHnDSx<mh>=gc@`hPc+Hu03^RXZXa<||u
+zuOGQ*$Rc{|M{eAsroi}>GdN{(ioa1*@#@N_B2l~$+rG~7L5ht{BO@)u+lh*#c5;Ks
+za&2Q(C;aaBtrt5(jXF^G(sf<<famWj#i-9z3s=r=ro5Rk1Y+a2mwDFQ|Jsrr>TR^e
+zho7zXz*NfZ%7-&=WBFDbAN^bvLOHwe{PH96J}(sRw%>G*at+u$+!sgYR=VY~>!5}C
+zFx}%dc18=x;9X4<&L%3e?lx)PQ8-F0?X2MMyD9l-JNJk0jPYP8c=46~Q;Ge>q(X-i
+zH--!CE4ZjhDO1&4HbNYW#=Pj%o8jFwhVoZ;pREoDNG}+Jj_bobiFrrwPOQ#-5O>oD
+zfr`P6{guUsDfX6rd3^IEMO=_ZYC!O5n-pfc9rI!14hDV;YSR5l1s<XLviro0Epv&D
+z&kaIIP3A;bUCzhyX!KmOiB1T4F?X7i#yi}vt!L)`Pg#jH-m~VCFK-=B+CCCGYpy%e
+zErrZ(mOZQPO-mrBDUEF%YBpNyBwMUcd~5MDm8{id+k&b0!Vhg8RN(z%8!p=Jx~XFp
+z)VLQ<9ke`BvE6mICAp|^ih8fkevxM@2)5jR+Ua!)-JJZjc5aBtm{NhB!f{wPkUKDg
+z9+RvqaQ0i%0hZENvI|HXO^cJNDP?%sf)aO|^9355#jd;1HD)e%R>}(@ot5UtqR%Jf
+z2e1%N^);8Qqj6Ld7dqEI`K5e#^g#A41ivwD&LyI8kq;`}rm=ML4XTfu7t?wh3&nB(
+ze@DsZFS-rh$I^F|Rixc#gN<8xe<1Ly&cwXnm<_o&>DMojeAxzF)sWM>M=;4Rlwxdk
+z?lRe4q|snD&jk!brfYepghu4obiy<BXDWr?FBQyc0E6H3*<T&rUaN|=r|-igkF;og
+zi7IBND-)<#a_UP2c1LXI53j}0N(odE{=``#ZK!CJvjMvywSkb7-QRBqZ<8Q;+m@@~
+zIyT#&sOEd0A^0&SzrlYvfc%zCzbs4Oqw+OoqGa{qI6rR6)AiyB-p6RX*G;z%;p~bJ
+z`<$e;J`*_YI46Xre39Sai3>@-)%jptrNqF}5sDhq7)<#)DJuHZ_9IwxzgE!GbHN_g
+z2|S(U4GJo{nMBT)C{p#kSq#mco!T;T<2vTf#d?V?3YI#2qqO-Nj!B*_7-1V`-sS32
+zQ&F;=dCq%ssPQ5^(X!j^=UT&ZwBnWKA-??m1=Zi`R_ky?f`;XCSE*F!e&_$b0)Bj^
+z5B>E@n1}X91pbu}qNSo?;mUvS)`vy!;I|-Kj!$fZrCwYW+QMV%s)m?kX{Dnru4**5
+z*iHvIpQpib$TZl!KN4~4Q%_SVu;Xvh$z-k<x7kQ-5k;3SJ|;E@C*`f&6QVE2uyM0-
+zUD|LcjZyv8cq=o5kN!O-`IlfIZ|i=gDz%bINW>9hjRW(8i#qps=STEg$t3oF{h~iw
+zNAJE;%8MGeP=0ZL#P~b%fvns|tB7uQhU$yQ&CH8WpvELhjj2GBy@}vs&uz|f_RG?4
+zl#aBYMcOVY8AS-RM){rpChuRAb34D6&TEA8<(LMbAvJQ^={3K8P#N=jA~5xRoXRX^
+zpO>@)7HNC3i|TGNER23vr;ELiG*8*@b#nn0S8yM8Kim5wq`~~y==TW8F4IQE!&t>Q
+z#Rk=5!6^*Ho#of|Zz-~rYNIvnEv`FqZr}ZY-J`Yqsz!z5r@iHPE2(0hxsD1aNc}s~
+z*WE)@i`l1y(`!&Dh=F*WwcgjA{n?#2DQ)s=Sncwo5G{}XcjQdvPqDVi;r{Ag`fjWk
+zM3iK#r+0tH_w@=Sb$a_|Q5F2aQK=6!3W$!*(zGi}m&6YeP21~Pkv70n!~Og9Oo_(U
+zm`(Dl?h?+*md(&%!aSJ@kU(#pwhNx*7i|>3|H_x!GWM^1iral)M>?Vyv*OMlahorI
+zJDU2w7$*56oqu!!TXx~3cRm9q`J2+1D8+Hh6A`%=0(gfS?=NVOi5mnB%&F(b?}<m~
+zy6X#kRhNe4D{sGTA5jmtIYQLB-7D0pG$*R#p5>Yx83~Jjo{qmFgi>0tafgHK!=o<_
+z?N?!{q72N8!-aps%BkqNw+iA6ItL2byz6(i{@%;@Ur83JOBHGRL1PMXORB&i|2N*d
+z^mzIBZcvy~f3^fBncr#jh%5hAsq2Vf(MXH>pMv8v<t4FmWR64X3!@G{*byzw{KVZW
+zpM;d=wge(?Z(noa?EjWeqiDAN;T$8P_1dQ-!%0LqlH8Txy^y65NG9H0pB1*@<oLlV
+zzxVo)n(kUy`*feuozc+!X2FeLynWKrj4zf<)=#3w#6$LZ98<c59_{Ysau;%8)f;2l
+zojTq)_uCK1khXN^5%H^p#bw8l<}-?cj%oq>+}7*)clOj^rPJ$mZlq2B=R3aLmou`>
+z&gq3wl*V%|R$OUcI(+xPB*9s!nl!pJ^xyY1Y^-o+u4s=6{8w34bf;|lcVLjD3EZLI
+zm9l-i(rH6ydD?YnteAh^roWMvQ#POd$~uBj9sN3Agn_u2qdlum_>pbOHf+is>XB8Q
+zC-1c%Gh|>UKc@;*($4PWq*cb}SH^n|h|Ti`!>YCh!Sa$kk3i#<ljyCrvpWR(jef$O
+z1VMSIL9jb?H>b>3?Y})QXCh^rcMXnJc!t$PeKi<U-1{N(wGR7=6``%Q@=L9@d_eQZ
+z?~Z3c%-Gb;)-<DC<_d=X$m~yR3j++WhVW81+$2sTzYUJ>MMV?T|8~(3#&?)rbo>fo
+zs)*lT*^D8?^|<T*hShc7Z<a(m-!ORpb^;k^GTaJ)wRi>2vx4k{9V;%drY!pz4|?nT
+zOwNh&;}+AY>u3F3g9Tt&V^@Hm!s~M)`rS3B*Nu44mn``?tBcR-m`c6Z-;dX>XTj3R
+z;Dfrx6EDmcEq*zvf$$S*i(w$*&50pdUYF0>>EvP<ws9+FSUBm^{pq}kFPEXaPg69A
+zsOoEwmhNu2QRv&@ZtHdm!<JOazb6s(oH2f39^YFwqzb~%uryk+l8I|sbEX+JHyOKM
+z>~W9lm*sqpVA%8vtaq83b)uIC&#TTCn%Es7cFM%`l)Tuq4GBKqAm=iAa}o~XrIR%?
+zr~8iK*o)DjwR5mGQYmhKeb}G!uSz=a$aMHV2E&$D^6<t1uP-xpLir0LYXWwzqtf%M
+zQ;=HP@Js0aa6oqpz3#Vw)o%ybc6XT52&yZ?`?;=KN;}S75Ue!SME?I*>UvNF%QCT#
+ZWW-6FcXu6cfVH{cs;bWAqD#22{{xqW^tk{4
+
+literal 0
+HcmV?d00001
+
+diff --git a/packages/SystemUI/res/drawable-nodpi/gtos_analog_hour.png b/packages/SystemUI/res/drawable-nodpi/gtos_analog_hour.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..74e30fc38a80bed14d6198a891e7fdf44f82ff8f
+GIT binary patch
+literal 3260
+zcmeAS@N?(olHy`uVBq!ia0y~yU_JoC94tVQfcrNDfRtp3YeY$Kep*R+Vo@rCV@iHf
+zs)A>3VtQ&&YGO)d;mK4R1_quuPZ!6Kid%1Q-Q{gE5NWvB&Ap>Z`hiB@g4vc#$`9B!
+zF=`tyemi(X-au`V)T}v&h2P%xJu^LMwIM@8{cQ<G1`Y!dQaAuY4Ghdc#K6P@LJ*0O
+zEC&e`?BOyp<RA$GJxxITK2qeQDbFJZRwr*Uyf@!$FXPdbZpICp-Yn|;mAkgv`HLGf
+z6VH>=?@hNEzjl73D&h4=*ksDmnP>BtTs>Cc(9mepH@W{j|JL0J0tpJ?4fXd~!;Z=t
+zOnGvff18m~0TUYoiv$!2BrpJxLjxlaF)*@$5JV0lF|y^98L$KiN?4%<*NBoMoQ8lZ
+zaHcPs$t676lprpU@WA~!>+S=qLKaIpc&-bqzwt6D-{t`e&y&KA#IjlsYhW2P^UKRQ
+zx6jV2t3J%g$o5I?$CoedtG%lx$7}RiCoq6A$w-b|Ml&YdaW`5vKr%Y^GIM0eK}*Kb
+jJTh8;Vrx4@%$A;~t6Q$z-ckzejxcz-`njxgN@xNAV|mei
+
+literal 0
+HcmV?d00001
+
+diff --git a/packages/SystemUI/res/drawable-nodpi/gtos_analog_minute.png b/packages/SystemUI/res/drawable-nodpi/gtos_analog_minute.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..784f63f87d96de6734693b847dcfa501e80f426d
+GIT binary patch
+literal 3260
+zcmeAS@N?(olHy`uVBq!ia0y~yU_JoC94tVQfcrNDfRtp3YeY$Kep*R+Vo@rCV@iHf
+zs)A>3VtQ&&YGO)d;mK4R1_quuPZ!6Kid%1QUF2;t5OKKJ&b^~a`hZ5?g4vc#$`9B!
+zF=`tyemm^4SVGu`xA*x6*WcfTii5LESs6ZLODi)lFtULViv$P>B!G}Z10xVYC5ENk
+z!+M!T-7mkDyyVsJGo8seB~?84ihp+Pn`8qifdqy4I{l4vBjp!QOwj1`zYs93%xwR}
+zu;{~#jBKAQ_SDquTYZ<cnSpsH)1Dgf2+{Hb0h9dgZ=C8lzzGXK^dQ6xTSV}VM7drD
+z+{q0R9@vxO$dH5NL40XwxXVGxpV2&mt4JOZ`5@xOpQCyT2M#zb*Dq@fU8!c=FezqH
+z-R8^g$u<vIc%E$RFD$F|v2I{sp2_oa&h7K_>e#^rwAzm!AKF(JS51!B=(A2>C}0|a
+zwHtEnZN`MHQir6V(UNAgq#4ewJmh?UuZ26BM{u?%B4%q#&ekoTvF*cRV0VPU)78&q
+Iol`;+0ImSKO8@`>
+
+literal 0
+HcmV?d00001
+

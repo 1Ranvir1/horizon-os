@@ -1,0 +1,8 @@
+// The live phone uses the same resource-only overlay as a reversible update.
+// New ROM installations enable this built-in variant automatically.
+runtime_resource_overlay {
+    name: "GTOSHorizonBranding",
+    manifest: "AndroidManifest-ROM.xml",
+    product_specific: true,
+    certificate: "platform",
+}

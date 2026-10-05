@@ -1,0 +1,186 @@
+--- a/packages/SystemUI/src/com/android/systemui/theme/ThemeOverlayController.java
++++ b/packages/SystemUI/src/com/android/systemui/theme/ThemeOverlayController.java
+@@ -220,7 +220,8 @@
+                     ? ThemeOverlayController.this.mIsKeyguardOnAsleepState.getValue()
+                     : mWakefulnessLifecycle.getWakefulness() != WAKEFULNESS_ASLEEP;
+ 
+-            if (currentUser && !mAcceptColorEvents && isAsleep) {
++            if (currentUser && !mAcceptColorEvents && isAsleep
++                    && !isLivingSkyWallpaper(userId)) {
+                 mDeferredWallpaperColors.put(userId, wallpaperColors);
+                 mDeferredWallpaperColorsFlags.put(userId, which);
+                 Log.i(TAG, "colors received; processing deferred until screen off: "
+@@ -306,6 +307,16 @@
+             }
+         }
+         return false;
++    }
++
++    // Living sky changes only on a real palette transition, not on animation frames.
++    // Apply those colors while awake so launcher icons and system controls stay in sync.
++    private boolean isLivingSkyWallpaper(int userId) {
++        if (!mContext.getResources().getBoolean(
++                com.android.systemui.res.R.bool.config_gtosLiveSkyColors)) return false;
++        android.app.WallpaperInfo info = mWallpaperManager.getWallpaperInfo(userId);
++        return info != null && new android.content.ComponentName("dev.gtos.launcher",
++                "dev.gtos.launcher.design.SkyWallpaperService").equals(info.getComponent());
+     }
+ 
+     private void handleWallpaperColors(WallpaperColors wallpaperColors, int flags, int userId) {
+--- a/packages/SystemUI/res/values/gtos_config.xml
++++ b/packages/SystemUI/res/values/gtos_config.xml
+@@ -1,4 +1,6 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
+     <bool name="config_gtosGlassControls">false</bool>
++    <bool name="config_gtosLiveSkyColors">false</bool>
++    <bool name="config_gtosCalibratedNrSignal">false</bool>
+ </resources>
+--- a/packages/SystemUI/src/com/android/systemui/statusbar/pipeline/mobile/data/repository/prod/MobileConnectionRepositoryImpl.kt
++++ b/packages/SystemUI/src/com/android/systemui/statusbar/pipeline/mobile/data/repository/prod/MobileConnectionRepositoryImpl.kt
+@@ -270,10 +270,37 @@
+             }
+             .stateIn(scope, SharingStarted.WhileSubscribed(), SIGNAL_STRENGTH_NONE_OR_UNKNOWN)
+ 
++    // Device opt-in: show measured SA 5G power, capped by measured signal quality.
++    // This changes the display scale only; modem reports and network behavior stay intact.
++    private fun calibratedNrLevel(signal: SignalStrength): Int {
++        if (!context.resources.getBoolean(
++                com.android.systemui.res.R.bool.config_gtosCalibratedNrSignal) ||
++            telephonyManager.dataNetworkType != TelephonyManager.NETWORK_TYPE_NR) {
++            return signal.level
++        }
++        val nr = signal.getCellSignalStrengths(android.telephony.CellSignalStrengthNr::class.java)
++            .firstOrNull { it.ssRsrp in -140..-44 } ?: return signal.level
++        val power = when {
++            nr.ssRsrp >= -90 -> 4
++            nr.ssRsrp >= -100 -> 3
++            nr.ssRsrp >= -110 -> 2
++            nr.ssRsrp >= -120 -> 1
++            else -> 0
++        }
++        val quality = if (nr.ssSinr !in -23..40) 4 else when {
++            nr.ssSinr >= 20 -> 4
++            nr.ssSinr >= 10 -> 3
++            nr.ssSinr >= 5 -> 2
++            nr.ssSinr >= 0 -> 1
++            else -> 0
++        }
++        return minOf(power, quality)
++    }
++
+     override val primaryLevel =
+         callbackEvents
+             .mapNotNull { it.onSignalStrengthChanged }
+-            .map { it.signalStrength.level }
++            .map { calibratedNrLevel(it.signalStrength) }
+             .stateIn(scope, SharingStarted.WhileSubscribed(), SIGNAL_STRENGTH_NONE_OR_UNKNOWN)
+ 
+     override val satelliteLevel: StateFlow<Int> =
+--- a/packages/SystemUI/src/com/android/systemui/qs/panels/ui/compose/infinitegrid/Tile.kt
++++ b/packages/SystemUI/src/com/android/systemui/qs/panels/ui/compose/infinitegrid/Tile.kt
+@@ -28,6 +28,7 @@
+ import androidx.compose.animation.core.animateDpAsState
+ import androidx.compose.foundation.ExperimentalFoundationApi
+ import androidx.compose.foundation.background
++import androidx.compose.foundation.border
+ import androidx.compose.foundation.combinedClickable
+ import androidx.compose.foundation.gestures.Orientation
+ import androidx.compose.foundation.interaction.MutableInteractionSource
+@@ -57,6 +58,7 @@
+ import androidx.compose.ui.Alignment
+ import androidx.compose.ui.Modifier
+ import androidx.compose.ui.draw.clip
++import androidx.compose.ui.draw.drawWithContent
+ import androidx.compose.ui.geometry.Size
+ import androidx.compose.ui.graphics.Color
+ import androidx.compose.ui.graphics.Shape
+@@ -355,9 +357,24 @@
+     modifier: Modifier = Modifier,
+     content: @Composable (Expandable) -> Unit,
+ ) {
++    val context = androidx.compose.ui.platform.LocalContext.current
++    val enabled = context.resources.getBoolean(R.bool.config_gtosGlassControls)
++    val highlight = remember {
++        androidx.compose.ui.graphics.Brush.verticalGradient(listOf(
++            Color.White.copy(alpha = .10f), Color.White.copy(alpha = .01f),
++            Color.White.copy(alpha = .04f)))
++    }
++    val rim = remember {
++        androidx.compose.ui.graphics.Brush.verticalGradient(listOf(
++            Color.White.copy(alpha = .35f), Color.White.copy(alpha = .07f)))
++    }
++    val glass = if (enabled) Modifier.drawWithContent {
++        drawContent()
++        drawRect(highlight)
++    }.border(.7.dp, rim, shape) else Modifier
+     Expandable(
+         controller = rememberExpandableController(color = color, shape = shape),
+-        modifier = modifier.clip(shape).verticalSquish(squishiness),
++        modifier = modifier.clip(shape).verticalSquish(squishiness).then(glass),
+         useModifierBasedImplementation = true,
+     ) {
+         content(hapticsViewModel?.createStateAwareExpandable(it) ?: it)
+--- a/packages/SystemUI/src/com/android/systemui/volume/dialog/VolumeDialog.kt
++++ b/packages/SystemUI/src/com/android/systemui/volume/dialog/VolumeDialog.kt
+@@ -126,6 +126,42 @@
+         } else {
+             setContentView(R.layout.volume_dialog_horizontal)
+         }
++        if (isVolumeDialogVertical && context.resources.getBoolean(R.bool.config_gtosGlassControls)) {
++            val backdrop = requireViewById<View>(R.id.volume_dialog_background)
++            backdrop.repeatWhenAttached {
++                coroutineScopeTraced("[Volume]glass") {
++                    val manager = window!!.windowManager
++                    val previous = backdrop.background
++                    val previousForeground = backdrop.foreground
++                    val blur = backdrop.viewRootImpl.createBackgroundBlurDrawable()
++                    val radius = context.resources.getDimension(
++                        R.dimen.volume_dialog_background_corner_radius)
++                    blur.setCornerRadius(radius)
++                    val surface = context.getColor(com.android.internal.R.color.materialColorSurface)
++                    val listener = java.util.function.Consumer<Boolean> { enabled ->
++                        blur.setBlurRadius(if (enabled) context.resources.getDimensionPixelSize(
++                            R.dimen.volume_dialog_background_blur_radius) else 0)
++                        blur.setColor(if (enabled) androidx.core.graphics.ColorUtils.setAlphaComponent(
++                            surface, 190) else surface)
++                    }
++                    val rim = android.graphics.drawable.GradientDrawable(
++                        android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
++                        intArrayOf(0x1EFFFFFF, 0x02FFFFFF, 0x0BFFFFFF))
++                    rim.cornerRadius = radius
++                    rim.setStroke((context.resources.displayMetrics.density * .7f).toInt()
++                        .coerceAtLeast(1), 0x65FFFFFF)
++                    backdrop.background = blur
++                    backdrop.foreground = rim
++                    listener.accept(manager.isCrossWindowBlurEnabled)
++                    manager.addCrossWindowBlurEnabledListener(listener)
++                    try { awaitCancellation() } finally {
++                        manager.removeCrossWindowBlurEnabledListener(listener)
++                        backdrop.background = previous
++                        backdrop.foreground = previousForeground
++                    }
++                }
++            }
++        }
+         requireViewById<View>(R.id.volume_dialog).repeatWhenAttached {
+             coroutineScopeTraced("[Volume]dialog") {
+                 val component = componentFactory.create(this)
+--- a/packages/SystemUI/src/com/android/systemui/volume/dialog/ringer/ui/binder/VolumeDialogRingerViewBinder.kt
++++ b/packages/SystemUI/src/com/android/systemui/volume/dialog/ringer/ui/binder/VolumeDialogRingerViewBinder.kt
+@@ -236,9 +236,12 @@
+                     }
+                     is RingerViewModelState.Unavailable -> {
+                         drawerContainer.visibility = View.GONE
+-                        volumeDialogBackgroundView.setBackgroundResource(
+-                            R.drawable.volume_dialog_background
+-                        )
++                        if (volumeDialogBackgroundView.background !is
++                            com.android.internal.graphics.drawable.BackgroundBlurDrawable) {
++                            volumeDialogBackgroundView.setBackgroundResource(
++                                R.drawable.volume_dialog_background
++                            )
++                        }
+                     }
+                 }
+             }

@@ -1,0 +1,29 @@
+--- a/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/GtosAmbientSky.kt
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/GtosAmbientSky.kt
+@@ -53,6 +53,15 @@
+                 }
+             }
+         }
++    }
++
++    fun frameDelay(): Long {
++        val t = (SystemClock.elapsedRealtimeNanos() - (state?.epoch ?: 0L)) / 1_000_000_000.0
++        val day = sun?.let { it.altitude > 0 } ?: (java.time.LocalTime.now().hour in 6..19)
++        val flight = if (day) t > 20 && (t - 20) % 50 < 10
++            else SkyMeteor.age(t, 0) != null || SkyMeteor.age(t, 1) != null
++        // Smooth short flights; quiet star twinkle between them. No wake locks/alarms.
++        return if (flight) 33L else 250L
+     }
+ 
+     fun draw(canvas: Canvas, w: Float, h: Float, brightness: Float) {
+--- a/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/KeyguardRootView.kt
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/KeyguardRootView.kt
+@@ -84,7 +84,7 @@
+         // Native AOD time ticks still refresh celestial position/twinkle while suspended.
+         if (doze > 0f && android.animation.ValueAnimator.areAnimatorsEnabled()
+             && (state == android.view.Display.STATE_ON || state == android.view.Display.STATE_DOZE)) {
+-            postInvalidateDelayed(if (state == android.view.Display.STATE_ON) 33 else 100)
++            postInvalidateDelayed(if (doze < .99f) 33L else ambientSky.frameDelay())
+         }
+     }
+ }

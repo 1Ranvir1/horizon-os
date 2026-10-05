@@ -1,0 +1,355 @@
+--- a/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/GtosGlassClockPainter.kt
++++ b/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/GtosGlassClockPainter.kt
+@@ -2,45 +2,57 @@
+ 
+ import android.content.Context
+ import android.graphics.Canvas
+-import android.graphics.Color
+ import android.graphics.LinearGradient
++import android.graphics.Matrix
+ import android.graphics.Paint
++import android.graphics.Path
++import android.graphics.RectF
+ import android.graphics.Shader
+ import android.graphics.Typeface
+ 
+-/** Paint treatment only. Native clock views retain their time and accessibility. */
++/** Native time/accessibility stays authoritative. Cached ink bounds avoid narrow wrap sizing. */
+ internal class GtosGlassClockPainter(context: Context) {
+     val enabled: Boolean = context.resources.getIdentifier("config_gtosGlassControls", "bool", context.packageName).let {
+         it != 0 && context.resources.getBoolean(it)
+     }
+     private val ctx = context
+     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+-        typeface = Typeface.create(Typeface.create("sans-serif-condensed", Typeface.NORMAL), 200, false)
+-        textAlign = Paint.Align.CENTER
++        typeface = Typeface.create(Typeface.create("sans-serif", Typeface.NORMAL), 300, false)
++        textSize = 100f
+     }
++    private val ink = Path()
++    private val sourceBounds = RectF()
++    private val targetBounds = RectF()
++    private val matrix = Matrix()
++    private var lastText = ""
++    private var lastWidth = -1
+     private var lastHeight = -1
+     private var lastTint = 0
+ 
+     fun draw(canvas: Canvas, text: String, width: Int, height: Int) {
+         if (width <= 0 || height <= 0 || text.isBlank()) return
++        if (lastText != text || lastWidth != width || lastHeight != height) {
++            lastText = text
++            lastWidth = width
++            lastHeight = height
++            ink.reset()
++            paint.getTextPath(text, 0, text.length, 0f, 0f, ink)
++            ink.computeBounds(sourceBounds, true)
++            if (sourceBounds.isEmpty) return
++            targetBounds.set(width * .025f, height * .03f, width * .975f, height * .97f)
++            matrix.setRectToRect(sourceBounds, targetBounds, Matrix.ScaleToFit.FILL)
++            ink.transform(matrix)
++            lastTint = 0
++        }
+         val tint = ctx.getColor(android.R.color.system_accent1_100)
+-        if (height != lastHeight || tint != lastTint) {
+-            lastHeight = height
++        if (tint != lastTint) {
+             lastTint = tint
+-            val soft = (tint and 0x00ffffff) or (180 shl 24)
++            val translucent = (tint and 0x00ffffff) or (164 shl 24)
++            val body = (tint and 0x00ffffff) or (194 shl 24)
+             paint.shader = LinearGradient(0f, 0f, 0f, height.toFloat(),
+-                intArrayOf(0xf5ffffff.toInt(), soft, 0x85ffffff.toInt(), soft, 0xf0ffffff.toInt()),
+-                floatArrayOf(0f, .25f, .48f, .75f, 1f), Shader.TileMode.CLAMP)
++                intArrayOf(0xf2f6fcff.toInt(), translucent, body, 0xf0f6fcff.toInt()),
++                floatArrayOf(0f, .45f, .58f, 1f), Shader.TileMode.CLAMP)
+         }
+-        paint.textSize = height * .70f
+-        val measured = paint.measureText(text)
+-        if (measured > width * .94f) paint.textSize *= width * .94f / measured
+-        val fontHeight = paint.fontMetrics.descent - paint.fontMetrics.ascent
+-        val verticalScale = (height * .93f / fontHeight).coerceIn(1f, 2.7f)
+-        val save = canvas.save()
+-        canvas.scale(1f, verticalScale, width / 2f, height / 2f)
+-        val baseline = height / 2f - (paint.fontMetrics.ascent + paint.fontMetrics.descent) / 2f
+-        canvas.drawText(text, width / 2f, baseline, paint)
+-        canvas.restoreToCount(save)
++        canvas.drawPath(ink, paint)
+     }
+ }
+--- a/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/FlexClockTextView.kt
++++ b/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/FlexClockTextView.kt
+@@ -36,8 +36,10 @@
+     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+         super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+         if (glassClock.enabled && !isLargeClock && dozeFraction == 0f) {
+-            setMeasuredDimension((resources.displayMetrics.widthPixels * .86f).toInt(),
+-                kotlin.math.max(measuredHeight, (resources.displayMetrics.heightPixels * .20f).toInt()))
++            val wantedWidth = (resources.displayMetrics.widthPixels * .88f).toInt()
++            val wantedHeight = (resources.displayMetrics.heightPixels * .345f).toInt()
++            setMeasuredDimension(resolveSize(wantedWidth, widthMeasureSpec),
++                resolveSize(wantedHeight, heightMeasureSpec))
+         }
+     }
+ 
+--- a/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/FlexClockViewGroup.kt
++++ b/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/FlexClockViewGroup.kt
+@@ -140,8 +140,8 @@
+         val yBuffer = context.resources.getDimensionPixelSize(R.dimen.clock_vertical_digit_buffer)
+         val nativeSize = (maxChildSize + aodTranslate.abs()) * VPointF(xScale, 2f) + VPointF(0f, yBuffer)
+         return if (glassClock.enabled && dozeFraction == 0f)
+-            VPointF(resources.displayMetrics.widthPixels * .88f,
+-                kotlin.math.max(nativeSize.y, resources.displayMetrics.heightPixels * .24f))
++            VPointF(resolveSize((resources.displayMetrics.widthPixels * .88f).toInt(), widthMeasureSpec).toFloat(),
++                resolveSize((resources.displayMetrics.heightPixels * .345f).toInt(), heightMeasureSpec).toFloat())
+             else nativeSize
+     }
+ 
+--- a/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/layout/sections/ClockSection.kt
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/layout/sections/ClockSection.kt
+@@ -149,6 +149,24 @@
+                     )
+                 }
+             }
++            // Apply after the native face constraints so both awake clock sizes share this layout.
++            if (context.resources.getBoolean(R.bool.config_gtosGlassControls)) {
++                val metrics = context.resources.displayMetrics
++                val side = (metrics.widthPixels * .06f).toInt()
++                for (id in intArrayOf(ClockViewIds.LOCKSCREEN_CLOCK_VIEW_SMALL,
++                        ClockViewIds.LOCKSCREEN_CLOCK_VIEW_LARGE)) {
++                    clear(id, BOTTOM)
++                    connect(id, START, PARENT_ID, START, side)
++                    connect(id, END, PARENT_ID, END, side)
++                    connect(id, TOP, PARENT_ID, TOP, (metrics.heightPixels * .127f).toInt())
++                    constrainWidth(id, ConstraintSet.MATCH_CONSTRAINT)
++                    constrainHeight(id, (metrics.heightPixels * .345f).toInt())
++                    setHorizontalBias(id, .5f)
++                    setScaleX(id, 1f)
++                    setScaleY(id, 1f)
++                }
++                clockInteractor.setNotificationStackDefaultTop(metrics.heightPixels * .52f)
++            }
+         }
+     }
+ 
+--- a/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/layout/sections/KeyguardSliceViewSection.kt
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/layout/sections/KeyguardSliceViewSection.kt
+@@ -124,6 +124,19 @@
+                 ConstraintSet.BOTTOM,
+             )
+ 
++            if (context.resources.getBoolean(R.bool.config_gtosGlassControls)) {
++                val side = (context.resources.displayMetrics.widthPixels * .06f).toInt()
++                clear(R.id.keyguard_slice_view, ConstraintSet.TOP)
++                connect(R.id.keyguard_slice_view, ConstraintSet.TOP, ConstraintSet.PARENT_ID,
++                    ConstraintSet.TOP, (context.resources.displayMetrics.heightPixels * .086f).toInt())
++                connect(R.id.keyguard_slice_view, ConstraintSet.START, ConstraintSet.PARENT_ID,
++                    ConstraintSet.START, side)
++                connect(R.id.keyguard_slice_view, ConstraintSet.END, ConstraintSet.PARENT_ID,
++                    ConstraintSet.END, side)
++                constrainWidth(R.id.keyguard_slice_view, ConstraintSet.WRAP_CONTENT)
++                setHorizontalBias(R.id.keyguard_slice_view, .5f)
++            }
++
+             createBarrier(
+                 R.id.smart_space_barrier_bottom,
+                 Barrier.BOTTOM,
+--- a/packages/SystemUI/src/com/android/systemui/util/GlassControlPainter.java
++++ b/packages/SystemUI/src/com/android/systemui/util/GlassControlPainter.java
+@@ -13,6 +13,7 @@
+ 
+ /** Cached decorative glass highlights. Existing colors, clipping and accessibility stay authoritative. */
+ public final class GlassControlPainter {
++    private final Context context;
+     private final boolean enabled;
+     private final float strokeWidth;
+     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
+@@ -21,14 +22,22 @@
+     private final RectF rect = new RectF();
+     private final Rect tileBounds = new Rect();
+     private final float[] tileRadii = new float[8];
++    private final Paint lockFill = new Paint(Paint.ANTI_ALIAS_FLAG);
++    private final Paint lockEdge = new Paint(Paint.ANTI_ALIAS_FLAG);
++    private int lockTop = Integer.MIN_VALUE;
++    private int lockBottom = Integer.MIN_VALUE;
++    private int lockTint = 0;
+     private int gradientTop = Integer.MIN_VALUE;
+     private int gradientBottom = Integer.MIN_VALUE;
+ 
+     public GlassControlPainter(Context context) {
++        this.context = context;
+         enabled = context.getResources().getBoolean(R.bool.config_gtosGlassControls);
+         strokeWidth = context.getResources().getDisplayMetrics().density * .7f;
+         edge.setStyle(Paint.Style.STROKE);
+         edge.setStrokeWidth(strokeWidth);
++        lockEdge.setStyle(Paint.Style.STROKE);
++        lockEdge.setStrokeWidth(strokeWidth);
+     }
+ 
+     public void drawTile(Canvas canvas, int width, int height, float radius) {
+@@ -36,6 +45,28 @@
+         tileBounds.set(0, 0, width, height);
+         Arrays.fill(tileRadii, radius);
+         draw(canvas, tileBounds, tileRadii);
++    }
++
++    /** Lighter theme-tinted material for locked rows only, with wallpaper visible through it. */
++    public void drawLockscreen(Canvas canvas, Rect bounds, float[] radii) {
++        if (!enabled || bounds.isEmpty()) return;
++        final int tint = context.getColor(android.R.color.system_accent1_100) & 0x00ffffff;
++        if (lockTop != bounds.top || lockBottom != bounds.bottom || lockTint != tint) {
++            lockTop = bounds.top;
++            lockBottom = bounds.bottom;
++            lockTint = tint;
++            lockFill.setShader(new LinearGradient(0, bounds.top, 0, bounds.bottom,
++                    new int[]{0x47000000 | tint, 0x25000000 | tint, 0x32000000 | tint},
++                    new float[]{0f, .55f, 1f}, Shader.TileMode.CLAMP));
++            lockEdge.setShader(new LinearGradient(0, bounds.top, 0, bounds.bottom,
++                    new int[]{0x70F4FAFF, 0x2BE2EFFF}, null, Shader.TileMode.CLAMP));
++        }
++        rect.set(bounds);
++        rect.inset(strokeWidth / 2, strokeWidth / 2);
++        path.reset();
++        path.addRoundRect(rect, radii, Path.Direction.CW);
++        canvas.drawPath(path, lockFill);
++        canvas.drawPath(path, lockEdge);
+     }
+ 
+     public void draw(Canvas canvas, Rect bounds, float[] radii) {
+--- a/packages/SystemUI/src/com/android/systemui/statusbar/notification/row/NotificationBackgroundView.java
++++ b/packages/SystemUI/src/com/android/systemui/statusbar/notification/row/NotificationBackgroundView.java
+@@ -136,14 +136,13 @@
+ 
+             if (mBackground != null) {
+                 mBackground.setBounds(backgroundBounds);
+-                int glassLayer = -1;
+-                if (getResources().getBoolean(com.android.systemui.res.R.bool.config_gtosGlassControls)
+-                        && getParent() instanceof ExpandableNotificationRow row && row.isOnKeyguard()) {
+-                    glassLayer = canvas.saveLayerAlpha(0f, 0f, getWidth(), getHeight(), 117);
+-                }
++                boolean lockGlass = getResources().getBoolean(com.android.systemui.res.R.bool.config_gtosGlassControls)
++                        && getParent() instanceof ExpandableNotificationRow row && row.isOnKeyguard();
++                int glassLayer = lockGlass ? canvas.saveLayerAlpha(0f, 0f, getWidth(), getHeight(), 18) : -1;
+                 mBackground.draw(canvas);
+                 if (glassLayer != -1) canvas.restoreToCount(glassLayer);
+-                mGlassControlPainter.draw(canvas, mBackground.getBounds(), mCornerRadii);
++                if (lockGlass) mGlassControlPainter.drawLockscreen(canvas, mBackground.getBounds(), mCornerRadii);
++                else mGlassControlPainter.draw(canvas, mBackground.getBounds(), mCornerRadii);
+             }
+ 
+             canvas.restore();
+@@ -240,14 +239,13 @@
+                 right = (int) (left + actualWidth);
+             }
+             drawable.setBounds(left, top, right, bottom);
+-            int glassLayer = -1;
+-            if (getResources().getBoolean(com.android.systemui.res.R.bool.config_gtosGlassControls)
+-                    && getParent() instanceof ExpandableNotificationRow row && row.isOnKeyguard()) {
+-                glassLayer = canvas.saveLayerAlpha(0f, 0f, getWidth(), getHeight(), 117);
+-            }
++            boolean lockGlass = getResources().getBoolean(com.android.systemui.res.R.bool.config_gtosGlassControls)
++                    && getParent() instanceof ExpandableNotificationRow row && row.isOnKeyguard();
++            int glassLayer = lockGlass ? canvas.saveLayerAlpha(0f, 0f, getWidth(), getHeight(), 18) : -1;
+             drawable.draw(canvas);
+             if (glassLayer != -1) canvas.restoreToCount(glassLayer);
+-            mGlassControlPainter.draw(canvas, drawable.getBounds(), mCornerRadii);
++            if (lockGlass) mGlassControlPainter.drawLockscreen(canvas, drawable.getBounds(), mCornerRadii);
++            else mGlassControlPainter.draw(canvas, drawable.getBounds(), mCornerRadii);
+         }
+     }
+ 
+--- a/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/KeyguardRootView.kt
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/KeyguardRootView.kt
+@@ -37,6 +37,11 @@
+     private val cloudPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG)
+     private val cloudRect = android.graphics.RectF()
+     private val clockRect = android.graphics.Rect()
++    private val cloudMask = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
++        xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.DST_IN)
++    }
++    private var maskTop = -1f
++    private var maskBottom = -1f
+     private var lastTint = 0
+     private var lastFrame = 0L
+     private var clockView: android.view.View? = null
+@@ -68,17 +73,17 @@
+         }
+         val t = android.os.SystemClock.uptimeMillis() / 1000f
+         val exit = (1f - alpha).coerceIn(0f, 1f)
+-        val cw = width * if (front) .64f else .85f
++        val cw = width * if (front) .65f else .83f
+         val ch = cw * bitmap.height / bitmap.width
+         for (i in 0..1) {
+-            val base = width * (if (i == 0) .16f else .84f)
++            val base = width * (if (i == 0) -.04f else 1.04f)
+             val cx = base + kotlin.math.sin(t * .025f + i * 2f) * width * .08f
+             val direction = if (cx < width / 2f) -1f else 1f
+             val x = cx + direction * exit * (width + cw) * .8f
+-            val cy = if (front) clockRect.bottom - clockRect.height() * .20f
+-                else height * (.12f + i * .055f)
++            val cy = if (front) clockRect.bottom - clockRect.height() * .18f
++                else height * (.22f + i * .09f)
+             cloudRect.set(x - cw / 2, cy - ch / 2, x + cw / 2, cy + ch / 2)
+-            cloudPaint.alpha = if (front) 98 else 72
++            cloudPaint.alpha = if (front) 56 else 64
+             canvas.drawBitmap(bitmap, null, cloudRect, cloudPaint)
+         }
+     }
+@@ -100,11 +105,20 @@
+         offsetDescendantRectToMyCoords(clock, clockRect)
+         drawClouds(canvas, false)
+         super.dispatchDraw(canvas)
+-        val save = canvas.save()
+-        // Only the lower portion of the clock receives foreground cloud occlusion.
+-        // Notifications, date, status indicators and authentication controls stay clear.
+-        canvas.clipRect(clockRect.left.toFloat(), clockRect.top + clockRect.height() * .68f, clockRect.right.toFloat(), clockRect.bottom.toFloat())
++        // Full-width layer with a feathered vertical mask: no rectangular cut at the clock edges.
++        val top = clockRect.top + clockRect.height() * .59f
++        val bottom = clockRect.bottom + clockRect.height() * .06f
++        if (maskTop != top || maskBottom != bottom) {
++            maskTop = top
++            maskBottom = bottom
++            cloudMask.shader = android.graphics.LinearGradient(0f, top, 0f, bottom,
++                intArrayOf(0x00ffffff, 0xffffffff.toInt(), 0xffffffff.toInt(), 0x00ffffff),
++                floatArrayOf(0f, .24f, .76f, 1f), android.graphics.Shader.TileMode.CLAMP)
++        }
++        val save = canvas.saveLayer(0f, top, width.toFloat(), bottom, null)
++        canvas.clipRect(0f, top, width.toFloat(), bottom)
+         drawClouds(canvas, true)
++        canvas.drawRect(0f, top, width.toFloat(), bottom, cloudMask)
+         canvas.restoreToCount(save)
+         if (android.animation.ValueAnimator.areAnimatorsEnabled()) postInvalidateDelayed(33)
+     }
+--- a/packages/SystemUI/src/com/android/systemui/statusbar/notification/stack/NotificationStackScrollLayout.java
++++ b/packages/SystemUI/src/com/android/systemui/statusbar/notification/stack/NotificationStackScrollLayout.java
+@@ -2404,8 +2404,13 @@
+         mExpandHelper.setEnabled(enable);
+     }
+ 
++    private boolean isGtosGlassLockscreenList() {
++        return getResources().getBoolean(com.android.systemui.res.R.bool.config_gtosGlassControls)
++                && onKeyguard() && !mAmbientState.isDozing();
++    }
++
+     private boolean isScrollingEnabled() {
+-        return mScrollingEnabled;
++        return mScrollingEnabled || (isGtosGlassLockscreenList() && !mQsFullScreen);
+     }
+ 
+     boolean onKeyguard() {
+@@ -5731,6 +5736,7 @@
+ 
+     @Override
+     public int calculateMaxNotifications(int availableSpace, boolean useExtraShelfSpace) {
++        if (isGtosGlassLockscreenList()) return -1;
+         int shelfHeight = mShelf != null ? mShelf.getIntrinsicHeight() : 0;
+         return mNotificationStackSizeCalculator.computeMaxKeyguardNotifications(
+                 /* stack = */ this,
+@@ -5742,6 +5748,7 @@
+ 
+     @Override
+     public void setMaxDisplayedNotifications(int maxDisplayedNotifications) {
++        if (isGtosGlassLockscreenList()) maxDisplayedNotifications = -1;
+         if (mMaxDisplayedNotifications != maxDisplayedNotifications) {
+             if (mLogger != null) {
+                 mLogger.setMaxDisplayedNotifications(maxDisplayedNotifications);

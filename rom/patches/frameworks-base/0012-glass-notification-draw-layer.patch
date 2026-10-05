@@ -1,0 +1,37 @@
+--- a/packages/SystemUI/src/com/android/systemui/statusbar/notification/row/NotificationBackgroundView.java
++++ b/packages/SystemUI/src/com/android/systemui/statusbar/notification/row/NotificationBackgroundView.java
+@@ -136,13 +136,13 @@
+ 
+             if (mBackground != null) {
+                 mBackground.setBounds(backgroundBounds);
+-                int previousAlpha = mBackground.getAlpha();
++                int glassLayer = -1;
+                 if (getResources().getBoolean(com.android.systemui.res.R.bool.config_gtosGlassControls)
+-                    && getParent() instanceof ExpandableNotificationRow row && row.isOnKeyguard()) {
+-                    mBackground.setAlpha(Math.round(previousAlpha * 0.46f));
++                        && getParent() instanceof ExpandableNotificationRow row && row.isOnKeyguard()) {
++                    glassLayer = canvas.saveLayerAlpha(0f, 0f, getWidth(), getHeight(), 117);
+                 }
+                 mBackground.draw(canvas);
+-                mBackground.setAlpha(previousAlpha);
++                if (glassLayer != -1) canvas.restoreToCount(glassLayer);
+                 mGlassControlPainter.draw(canvas, mBackground.getBounds(), mCornerRadii);
+             }
+ 
+@@ -240,13 +240,13 @@
+                 right = (int) (left + actualWidth);
+             }
+             drawable.setBounds(left, top, right, bottom);
+-            int previousAlpha = drawable.getAlpha();
++            int glassLayer = -1;
+             if (getResources().getBoolean(com.android.systemui.res.R.bool.config_gtosGlassControls)
+                     && getParent() instanceof ExpandableNotificationRow row && row.isOnKeyguard()) {
+-                drawable.setAlpha(Math.round(previousAlpha * 0.46f));
++                glassLayer = canvas.saveLayerAlpha(0f, 0f, getWidth(), getHeight(), 117);
+             }
+             drawable.draw(canvas);
+-            drawable.setAlpha(previousAlpha);
++            if (glassLayer != -1) canvas.restoreToCount(glassLayer);
+             mGlassControlPainter.draw(canvas, drawable.getBounds(), mCornerRadii);
+         }
+     }

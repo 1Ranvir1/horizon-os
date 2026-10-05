@@ -1,0 +1,38 @@
+--- a/packages/SystemUI/src/com/android/systemui/statusbar/phone/UnlockedScreenOffAnimationController.kt
++++ b/packages/SystemUI/src/com/android/systemui/statusbar/phone/UnlockedScreenOffAnimationController.kt
+@@ -155,7 +155,16 @@
+         namedRunnable("startLightReveal") {
+             lightRevealAnimationPlaying = true
+             lightRevealAnimator.start()
+-        }
++            // Enter on the same frame as the fade, after isAnimationPlaying is set.
++            // An independent zero-delay handler can show AOD before this traversal.
++            if (gtosAnalog) showAodIfStillSleeping()
++        }
++
++    private fun showAodIfStillSleeping() {
++        if (!powerManager.isInteractive(Display.DEFAULT_DISPLAY) && shouldAnimateInKeyguard) {
++            shadeLockscreenInteractorLazy.get().showAodUi()
++        }
++    }
+ 
+     private val animatorDurationScaleObserver =
+         object : ContentObserver(null) {
+@@ -309,7 +318,7 @@
+             // chance of missing the first frame, so to mitigate this we should start the animation
+             // on the next frame.
+             DejankUtils.postAfterTraversal(startLightRevealCallback)
+-            handler.postDelayed(
++            if (!gtosAnalog) handler.postDelayed(
+                 {
+                     // Only run this callback if the device is sleeping (not interactive). This
+                     // callback is removed in onStartedWakingUp, but since that event is
+@@ -325,7 +334,7 @@
+                         shadeLockscreenInteractorLazy.get().showAodUi()
+                     }
+                 },
+-                ((if (gtosAnalog) 0L else ANIMATE_IN_KEYGUARD_DELAY) * animatorDurationScale).toLong(),
++                (ANIMATE_IN_KEYGUARD_DELAY * animatorDurationScale).toLong(),
+             )
+ 
+             return true

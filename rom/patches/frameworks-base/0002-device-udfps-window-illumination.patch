@@ -1,0 +1,84 @@
+--- a/packages/SystemUI/src/com/android/systemui/biometrics/ui/view/UdfpsTouchOverlay.kt
++++ b/packages/SystemUI/src/com/android/systemui/biometrics/ui/view/UdfpsTouchOverlay.kt
+@@ -16,6 +16,8 @@
+ package com.android.systemui.biometrics.ui.view
+ 
+ import android.content.Context
++import android.graphics.Canvas
++import android.graphics.Paint
+ import android.graphics.Rect
+ import android.graphics.RectF
+ import android.util.AttributeSet
+@@ -30,6 +32,26 @@
+  * for fingerprint authentication.
+  */
+ class UdfpsTouchOverlay(context: Context, attrs: AttributeSet?) : FrameLayout(context, attrs) {
++    // Some vendor composers recognize the main window buffer, not a SurfaceView child.
++    private val drawIlluminationInWindow =
++        context.resources.getBoolean(R.bool.config_udfpsDrawIlluminationInWindow)
++    private var illuminationVisible = false
++    private val illuminationPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
++        color = context.getColor(R.color.config_udfpsColor)
++        style = Paint.Style.FILL
++    }
++
++    init {
++        if (drawIlluminationInWindow) setWillNotDraw(false)
++    }
++
++    override fun onDraw(canvas: Canvas) {
++        super.onDraw(canvas)
++        if (drawIlluminationInWindow && illuminationVisible) {
++            canvas.drawOval(RectF(sensorRect), illuminationPaint)
++        }
++    }
++
+     private var ghbmView: UdfpsSurfaceView? = null
+     private var udfpsDisplayMode: UdfpsDisplayModeProvider? = null
+ 
+@@ -42,7 +64,7 @@
+         private set
+ 
+     override fun onFinishInflate() {
+-        ghbmView = findViewById(R.id.hbm_view)
++        ghbmView = if (drawIlluminationInWindow) null else findViewById(R.id.hbm_view)
+     }
+ 
+     fun setUdfpsDisplayModeProvider(udfpsDisplayModeProvider: UdfpsDisplayModeProvider?) {
+@@ -63,13 +85,24 @@
+ 
+     private fun doIlluminate(surface: Surface?, onDisplayConfigured: Runnable?) {
+         udfpsDisplayMode?.enable {
+-            onDisplayConfigured?.run()
+-            ghbmView?.drawIlluminationDot(RectF(sensorRect))
++            if (drawIlluminationInWindow) {
++                illuminationVisible = true
++                // Notify the sensor after the illumination frame has been submitted.
++                viewTreeObserver.registerFrameCommitCallback {
++                    post { if (isDisplayConfigured) onDisplayConfigured?.run() }
++                }
++                invalidate()
++            } else {
++                onDisplayConfigured?.run()
++                ghbmView?.drawIlluminationDot(RectF(sensorRect))
++            }
+         }
+     }
+ 
+     fun unconfigureDisplay() {
+         isDisplayConfigured = false
++        illuminationVisible = false
++        if (drawIlluminationInWindow) invalidate()
+         ghbmView?.let { view ->
+             view.setGhbmIlluminationListener(null)
+             view.visibility = INVISIBLE
+--- a/packages/SystemUI/res/values/config.xml
++++ b/packages/SystemUI/res/values/config.xml
+@@ -20,6 +20,7 @@
+ <!-- These resources are around just to allow their values to be customized
+      for different hardware and product builds. -->
+ <resources>
++    <bool name="config_udfpsDrawIlluminationInWindow">false</bool>
+     <!-- Component to be used as the recents implementation.  Must implement the
+      RecentsImplementation interface.  This name is in the ComponentName flattened format
+      (package/class)  -->

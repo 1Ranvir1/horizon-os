@@ -1,0 +1,7 @@
+{
+  "project": "Horizon OS",
+  "developed_by": "Ranvir Singh",
+  "github": "https://github.com/1Ranvir1/horizon-os",
+  "public_key_sha256": "9ac0e7396c50f20dd16d5773ee932dd9c5c483353f5e3da1b266716b43adae1d",
+  "verification": "Ed25519 signature; modification invalidates original attribution signature. Credit remains removable in forks."
+}

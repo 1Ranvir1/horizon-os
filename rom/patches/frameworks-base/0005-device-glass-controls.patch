@@ -1,0 +1,113 @@
+--- a/packages/SystemUI/src/com/android/systemui/qs/tileimpl/QSTileViewImpl.kt
++++ b/packages/SystemUI/src/com/android/systemui/qs/tileimpl/QSTileViewImpl.kt
+@@ -816,6 +816,14 @@
+         setOverlayColor(overlayColor)
+     }
+ 
++    private val glassControlPainter = com.android.systemui.util.GlassControlPainter(context)
++
++    override fun dispatchDraw(canvas: android.graphics.Canvas) {
++        glassControlPainter.drawTile(canvas, width, height,
++            resources.getDimension(R.dimen.qs_corner_radius))
++        super.dispatchDraw(canvas)
++    }
++
+     private fun setColor(color: Int) {
+         backgroundBaseDrawable.mutate().setTint(color)
+         backgroundColor = color
+--- a/packages/SystemUI/src/com/android/systemui/statusbar/notification/row/NotificationBackgroundView.java
++++ b/packages/SystemUI/src/com/android/systemui/statusbar/notification/row/NotificationBackgroundView.java
+@@ -137,6 +137,7 @@
+             if (mBackground != null) {
+                 mBackground.setBounds(backgroundBounds);
+                 mBackground.draw(canvas);
++                mGlassControlPainter.draw(canvas, mBackground.getBounds(), mCornerRadii);
+             }
+ 
+             canvas.restore();
+@@ -205,6 +206,9 @@
+         return isLayoutRtl();
+     }
+ 
++    private final com.android.systemui.util.GlassControlPainter mGlassControlPainter =
++            new com.android.systemui.util.GlassControlPainter(getContext());
++
+     private void draw(Canvas canvas, Drawable drawable) {
+         NotificationAddXOnHoverToDismiss.assertInLegacyMode();
+ 
+@@ -231,6 +235,7 @@
+             }
+             drawable.setBounds(left, top, right, bottom);
+             drawable.draw(canvas);
++            mGlassControlPainter.draw(canvas, drawable.getBounds(), mCornerRadii);
+         }
+     }
+ 
+--- /dev/null
++++ b/packages/SystemUI/src/com/android/systemui/util/GlassControlPainter.java
+@@ -0,0 +1,58 @@
++package com.android.systemui.util;
++
++import android.content.Context;
++import android.graphics.Canvas;
++import android.graphics.LinearGradient;
++import android.graphics.Paint;
++import android.graphics.Path;
++import android.graphics.Rect;
++import android.graphics.RectF;
++import android.graphics.Shader;
++import com.android.systemui.res.R;
++import java.util.Arrays;
++
++/** Cached decorative glass highlights. Existing colors, clipping and accessibility stay authoritative. */
++public final class GlassControlPainter {
++    private final boolean enabled;
++    private final float strokeWidth;
++    private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
++    private final Paint edge = new Paint(Paint.ANTI_ALIAS_FLAG);
++    private final Path path = new Path();
++    private final RectF rect = new RectF();
++    private final Rect tileBounds = new Rect();
++    private final float[] tileRadii = new float[8];
++    private int gradientTop = Integer.MIN_VALUE;
++    private int gradientBottom = Integer.MIN_VALUE;
++
++    public GlassControlPainter(Context context) {
++        enabled = context.getResources().getBoolean(R.bool.config_gtosGlassControls);
++        strokeWidth = context.getResources().getDisplayMetrics().density * .7f;
++        edge.setStyle(Paint.Style.STROKE);
++        edge.setStrokeWidth(strokeWidth);
++    }
++
++    public void drawTile(Canvas canvas, int width, int height, float radius) {
++        if (!enabled) return;
++        tileBounds.set(0, 0, width, height);
++        Arrays.fill(tileRadii, radius);
++        draw(canvas, tileBounds, tileRadii);
++    }
++
++    public void draw(Canvas canvas, Rect bounds, float[] radii) {
++        if (!enabled || bounds.isEmpty()) return;
++        if (gradientTop != bounds.top || gradientBottom != bounds.bottom) {
++            gradientTop = bounds.top;
++            gradientBottom = bounds.bottom;
++            fill.setShader(new LinearGradient(0, bounds.top, 0, bounds.bottom,
++                    new int[]{0x1EFFFFFF, 0x02FFFFFF, 0x0BFFFFFF}, null, Shader.TileMode.CLAMP));
++            edge.setShader(new LinearGradient(0, bounds.top, 0, bounds.bottom,
++                    new int[]{0x65FFFFFF, 0x12FFFFFF}, null, Shader.TileMode.CLAMP));
++        }
++        rect.set(bounds);
++        rect.inset(strokeWidth / 2, strokeWidth / 2);
++        path.reset();
++        path.addRoundRect(rect, radii, Path.Direction.CW);
++        canvas.drawPath(path, fill);
++        canvas.drawPath(path, edge);
++    }
++}
+--- /dev/null
++++ b/packages/SystemUI/res/values/gtos_config.xml
+@@ -0,0 +1,4 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <bool name="config_gtosGlassControls">false</bool>
++</resources>

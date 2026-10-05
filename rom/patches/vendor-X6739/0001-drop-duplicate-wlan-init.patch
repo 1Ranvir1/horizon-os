@@ -1,0 +1,9 @@
+diff --git a/X6739-vendor.mk b/X6739-vendor.mk
+--- a/X6739-vendor.mk
++++ b/X6739-vendor.mk
+@@ -251,5 +251,4 @@
+     vendor/infinix/X6739/proprietary/vendor/etc/init/vendor.trustonic.tee@1.1-service.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/vendor.trustonic.tee@1.1-service.rc \
+     vendor/infinix/X6739/proprietary/vendor/etc/init/volte_clientapi_ua.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/volte_clientapi_ua.rc \
+-    vendor/infinix/X6739/proprietary/vendor/etc/init/wlan_assistant.rc:$(TARGET_COPY_OUT_VENDOR)/etc/init/wlan_assistant.rc \
+     vendor/infinix/X6739/proprietary/vendor/etc/libnfc-hal-st.conf:$(TARGET_COPY_OUT_VENDOR)/etc/libnfc-hal-st.conf \
+     vendor/infinix/X6739/proprietary/vendor/etc/libnfc-nci.conf:$(TARGET_COPY_OUT_VENDOR)/etc/libnfc-nci.conf \

@@ -1,0 +1,137 @@
+--- a/packages/SystemUI/src/com/android/systemui/biometrics/UdfpsControllerOverlay.kt
++++ b/packages/SystemUI/src/com/android/systemui/biometrics/UdfpsControllerOverlay.kt
+@@ -140,7 +140,11 @@
+             .apply {
+                 // Some vendor composers identify the fingerprint illumination layer by name.
+                 // Keep the standard name unless the device explicitly supplies its vendor name.
+-                title = context.resources.getString(
++                // This window listens for touches throughout enrollment. Giving it the
++                // vendor HBM name would start capture before a finger is on the sensor.
++                title = if (context.resources.getBoolean(
++                    com.android.systemui.res.R.bool.config_udfpsDrawIlluminationInWindow
++                )) TAG else context.resources.getString(
+                     com.android.systemui.res.R.string.config_udfpsVendorWindowTitle
+                 ).ifEmpty { TAG }
+                 fitInsetsTypes = 0
+--- a/packages/SystemUI/src/com/android/systemui/biometrics/ui/view/UdfpsTouchOverlay.kt
++++ b/packages/SystemUI/src/com/android/systemui/biometrics/ui/view/UdfpsTouchOverlay.kt
+@@ -18,10 +18,15 @@
+ import android.content.Context
+ import android.graphics.Canvas
+ import android.graphics.Paint
++import android.graphics.PixelFormat
+ import android.graphics.Rect
+ import android.graphics.RectF
+ import android.util.AttributeSet
+ import android.view.Surface
++import android.view.Gravity
++import android.view.View
++import android.view.WindowManager
++import com.android.systemui.biometrics.Utils
+ import android.widget.FrameLayout
+ import com.android.systemui.biometrics.UdfpsDisplayModeProvider
+ import com.android.systemui.biometrics.UdfpsSurfaceView
+@@ -35,21 +40,71 @@
+     // Some vendor composers recognize the main window buffer, not a SurfaceView child.
+     private val drawIlluminationInWindow =
+         context.resources.getBoolean(R.bool.config_udfpsDrawIlluminationInWindow)
+-    private var illuminationVisible = false
++    private val windowManager = context.getSystemService(WindowManager::class.java)!!
++    private var illuminationWindow: View? = null
++    private var illuminationGeneration = 0
+     private val illuminationPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+         color = context.getColor(R.color.config_udfpsColor)
+         style = Paint.Style.FILL
+     }
+ 
+-    init {
+-        if (drawIlluminationInWindow) setWillNotDraw(false)
++    private fun showIlluminationWindow(onDisplayConfigured: Runnable?) {
++        if (illuminationWindow != null) return
++        val generation = ++illuminationGeneration
++        val illumination = object : View(context) {
++            init { setWillNotDraw(false) }
++            override fun onDraw(canvas: Canvas) {
++                super.onDraw(canvas)
++                canvas.drawOval(RectF(sensorRect), illuminationPaint)
++            }
++        }
++        illumination.addOnAttachStateChangeListener(object : OnAttachStateChangeListener {
++            override fun onViewAttachedToWindow(view: View) {
++                view.viewTreeObserver.registerFrameCommitCallback {
++                    view.post {
++                        if (isDisplayConfigured && generation == illuminationGeneration) {
++                            onDisplayConfigured?.run()
++                        }
++                    }
++                }
++            }
++            override fun onViewDetachedFromWindow(view: View) {}
++        })
++        val params = WindowManager.LayoutParams(
++            WindowManager.LayoutParams.MATCH_PARENT,
++            WindowManager.LayoutParams.MATCH_PARENT,
++            WindowManager.LayoutParams.TYPE_NAVIGATION_BAR_PANEL,
++            Utils.FINGERPRINT_OVERLAY_LAYOUT_PARAM_FLAGS or
++                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
++            PixelFormat.TRANSLUCENT
++        ).apply {
++            title = context.getString(R.string.config_udfpsVendorWindowTitle)
++            gravity = Gravity.TOP or Gravity.LEFT
++            fitInsetsTypes = 0
++            layoutInDisplayCutoutMode =
++                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
++            privateFlags = WindowManager.LayoutParams.PRIVATE_FLAG_TRUSTED_OVERLAY or
++                WindowManager.LayoutParams.PRIVATE_FLAG_EXCLUDE_FROM_SCREEN_MAGNIFICATION
++            accessibilityTitle = " "
++        }
++        illuminationWindow = illumination
++        try {
++            windowManager.addView(illumination, params)
++        } catch (e: RuntimeException) {
++            illuminationWindow = null
++            throw e
++        }
+     }
+ 
+-    override fun onDraw(canvas: Canvas) {
+-        super.onDraw(canvas)
+-        if (drawIlluminationInWindow && illuminationVisible) {
+-            canvas.drawOval(RectF(sensorRect), illuminationPaint)
+-        }
++    private fun hideIlluminationWindow() {
++        ++illuminationGeneration
++        illuminationWindow?.let { windowManager.removeViewImmediate(it) }
++        illuminationWindow = null
++    }
++
++    override fun onDetachedFromWindow() {
++        if (drawIlluminationInWindow) unconfigureDisplay()
++        super.onDetachedFromWindow()
+     }
+ 
+     private var ghbmView: UdfpsSurfaceView? = null
+@@ -86,12 +141,7 @@
+     private fun doIlluminate(surface: Surface?, onDisplayConfigured: Runnable?) {
+         udfpsDisplayMode?.enable {
+             if (drawIlluminationInWindow) {
+-                illuminationVisible = true
+-                // Notify the sensor after the illumination frame has been submitted.
+-                viewTreeObserver.registerFrameCommitCallback {
+-                    post { if (isDisplayConfigured) onDisplayConfigured?.run() }
+-                }
+-                invalidate()
++                showIlluminationWindow(onDisplayConfigured)
+             } else {
+                 onDisplayConfigured?.run()
+                 ghbmView?.drawIlluminationDot(RectF(sensorRect))
+@@ -101,8 +151,7 @@
+ 
+     fun unconfigureDisplay() {
+         isDisplayConfigured = false
+-        illuminationVisible = false
+-        if (drawIlluminationInWindow) invalidate()
++        if (drawIlluminationInWindow) hideIlluminationWindow()
+         ghbmView?.let { view ->
+             view.setGhbmIlluminationListener(null)
+             view.visibility = INVISIBLE

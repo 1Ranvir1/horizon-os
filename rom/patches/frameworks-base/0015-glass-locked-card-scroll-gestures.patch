@@ -1,0 +1,39 @@
+--- a/packages/SystemUI/src/com/android/systemui/shade/NotificationPanelViewController.java
++++ b/packages/SystemUI/src/com/android/systemui/shade/NotificationPanelViewController.java
+@@ -3842,6 +3842,7 @@
+     /** Handles MotionEvents for the Shade. */
+     public final class TouchHandler implements View.OnTouchListener, Gefingerpoken {
+         private long mLastTouchDownTime = -1L;
++        private boolean mGtosTouchStartedOnCard;
+ 
+         /**
+          * With the shade and lockscreen being separated in the view hierarchy, touch handling now
+@@ -3855,6 +3856,14 @@
+         public boolean onInterceptTouchEvent(MotionEvent event) {
+             if (!mUseExternalTouch) {
+                 return false;
++            }
++
++            if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
++                mGtosTouchStartedOnCard = mView.getResources().getBoolean(R.bool.config_gtosGlassControls)
++                        && mBarState == KEYGUARD
++                        && mNotificationStackScrollLayoutController.getChildAtRawPosition(
++                                event.getRawX(), event.getRawY())
++                                instanceof com.android.systemui.statusbar.notification.row.ExpandableNotificationRow;
+             }
+ 
+             mShadeLog.logMotionEvent(event, "NPVC onInterceptTouchEvent");
+@@ -3977,6 +3986,13 @@
+                 case MotionEvent.ACTION_MOVE:
+                     final float h = y - mInitialExpandY;
+                     addMovement(event);
++                    // An upward gesture beginning on a locked card belongs to its scroll list.
++                    // Empty-space unlock gestures and downward shade expansion stay native.
++                    if (mGtosTouchStartedOnCard && mBarState == KEYGUARD && h < 0
++                            && !mQsController.getExpanded() && !mAnimatingOnDown
++                            && !mPanelClosedOnDown) {
++                        return false;
++                    }
+                     final boolean openShadeWithoutHun =
+                             mPanelClosedOnDown && !mCollapsedAndHeadsUpOnDown;
+                     if (canCollapsePanel || mTouchStartedInEmptyArea || mAnimatingOnDown

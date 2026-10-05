@@ -1,0 +1,12 @@
+diff --git a/device.mk b/device.mk
+--- a/device.mk
++++ b/device.mk
+@@ -102,8 +102,4 @@
+     android.hardware.bluetooth-service.mediatek
+ 
+-PRODUCT_PACKAGES += \
+-    vendor.mediatek.hardware.bluetooth.audio@2.1.vendor:64 \
+-    vendor.mediatek.hardware.bluetooth.audio@2.2.vendor:64
+-
+ # Boot Control
+ PRODUCT_PACKAGES += \

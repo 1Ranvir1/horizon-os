@@ -1,0 +1,79 @@
+--- a/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/GtosGlassClockPainter.kt
++++ b/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/GtosGlassClockPainter.kt
+@@ -17,16 +17,12 @@
+     }
+     private val ctx = context
+     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+-        typeface = Typeface.create(Typeface.create("sans-serif", Typeface.NORMAL), 400, false)
++        typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD)
+         textSize = 100f
+         val density = context.resources.displayMetrics.density
+         setShadowLayer(density * 3f, 0f, density * 1.2f, 0x50040d1a)
+     }
+     private val ink = Path()
+-    private val trimUp = Path()
+-    private val trimDown = Path()
+-    private val trimIntermediate = Path()
+-    private val balancedInk = Path()
+     private val hoursPath = Path()
+     private val minutesPath = Path()
+     private val hourBounds = RectF()
+@@ -58,42 +54,33 @@
+                 val top = kotlin.math.min(hourBounds.top, minuteBounds.top)
+                 val bottom = kotlin.math.max(hourBounds.bottom, minuteBounds.bottom)
+                 val gap = width * .14f
+-                val sx = width * .81f / (hourBounds.width() + minuteBounds.width())
+-                val sy = height * .94f / (bottom - top)
+-                val x = width * .025f
+-                val y = height * .03f
+-                matrix.setScale(sx, sy)
+-                matrix.postTranslate(x - hourBounds.left * sx, y - top * sy)
++                // Keep the bold font's natural stroke proportions: one uniform scale.
++                val scale = kotlin.math.min(width * .81f / (hourBounds.width() + minuteBounds.width()),
++                        height * .94f / (bottom - top))
++                val digitsWidth = (hourBounds.width() + minuteBounds.width()) * scale
++                val x = (width - digitsWidth - gap) / 2f
++                val y = (height - (bottom - top) * scale) / 2f
++                matrix.setScale(scale, scale)
++                matrix.postTranslate(x - hourBounds.left * scale, y - top * scale)
+                 hoursPath.transform(matrix)
+-                val minuteX = x + hourBounds.width() * sx + gap
+-                matrix.setScale(sx, sy)
+-                matrix.postTranslate(minuteX - minuteBounds.left * sx, y - top * sy)
++                val minuteX = x + hourBounds.width() * scale + gap
++                matrix.setScale(scale, scale)
++                matrix.postTranslate(minuteX - minuteBounds.left * scale, y - top * scale)
+                 minutesPath.transform(matrix)
+                 ink.addPath(hoursPath)
+                 ink.addPath(minutesPath)
+-                // Balance horizontal stroke thickness after the tall face transformation.
+-                // Cached vector intersections keep the vertical strokes broad, without a heavy cap on 7.
+-                val trim = height * .023f
+-                trimUp.set(ink)
+-                trimUp.offset(0f, -trim)
+-                trimDown.set(ink)
+-                trimDown.offset(0f, trim)
+-                if (trimIntermediate.op(ink, trimUp, Path.Op.INTERSECT)
+-                        && balancedInk.op(trimIntermediate, trimDown, Path.Op.INTERSECT)
+-                        && !balancedInk.isEmpty) {
+-                    ink.set(balancedInk)
+-                }
+                 // Round dots stay centered around half the clock height.
+-                val dotX = x + hourBounds.width() * sx + gap / 2f
++                val dotX = x + hourBounds.width() * scale + gap / 2f
+                 val radius = width * .019f
+-                ink.addCircle(dotX, height * .32f, radius, Path.Direction.CW)
+-                ink.addCircle(dotX, height * .68f, radius, Path.Direction.CW)
++                val digitHeight = (bottom - top) * scale
++                ink.addCircle(dotX, y + digitHeight * .32f, radius, Path.Direction.CW)
++                ink.addCircle(dotX, y + digitHeight * .68f, radius, Path.Direction.CW)
+             } else {
+                 paint.getTextPath(text, 0, text.length, 0f, 0f, ink)
+                 ink.computeBounds(sourceBounds, true)
+                 if (sourceBounds.isEmpty) return
+                 targetBounds.set(width * .025f, height * .03f, width * .975f, height * .97f)
+-                matrix.setRectToRect(sourceBounds, targetBounds, Matrix.ScaleToFit.FILL)
++                matrix.setRectToRect(sourceBounds, targetBounds, Matrix.ScaleToFit.CENTER)
+                 ink.transform(matrix)
+             }
+             lastTint = 0

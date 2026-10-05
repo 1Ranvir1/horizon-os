@@ -1,0 +1,12 @@
+.gradle/
+.kotlin/
+.idea/
+.tooling/
+**/build/
+local.properties
+*.pem
+*.pk8
+*.jks
+*.keystore
+*.password
+__pycache__/

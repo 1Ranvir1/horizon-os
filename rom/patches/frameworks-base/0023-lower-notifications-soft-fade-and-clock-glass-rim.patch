@@ -1,0 +1,112 @@
+--- a/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/layout/sections/ClockSection.kt
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/layout/sections/ClockSection.kt
+@@ -166,7 +166,7 @@
+                     setScaleX(id, 1f)
+                     setScaleY(id, 1f)
+                 }
+-                clockInteractor.setNotificationStackDefaultTop(metrics.heightPixels * .52f)
++                clockInteractor.setNotificationStackDefaultTop(metrics.heightPixels * .66f)
+             }
+         }
+     }
+--- a/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/layout/sections/DefaultNotificationStackScrollLayoutSection.kt
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/layout/sections/DefaultNotificationStackScrollLayoutSection.kt
+@@ -78,7 +78,7 @@
+             if (context.resources.getBoolean(R.bool.config_gtosGlassControls)) {
+                 // Moving the date above the clock must not move the list over the clock.
+                 connect(R.id.nssl_placeholder, TOP, PARENT_ID, TOP,
+-                    (context.resources.displayMetrics.heightPixels * .52f).toInt())
++                    (context.resources.displayMetrics.heightPixels * .66f).toInt())
+             }
+             addNotificationPlaceholderBarrier(this)
+         }
+--- a/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/GtosGlassClockPainter.kt
++++ b/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/GtosGlassClockPainter.kt
+@@ -21,6 +21,10 @@
+         textSize = 100f
+         val density = context.resources.displayMetrics.density
+         setShadowLayer(density * 3f, 0f, density * 1.2f, 0x50040d1a)
++    }
++    private val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
++        style = Paint.Style.STROKE
++        strokeWidth = context.resources.displayMetrics.density * .45f
+     }
+     private val ink = Path()
+     private val glyphPath = Path()
+@@ -120,10 +124,16 @@
+             val translucent = (tint and 0x00ffffff) or (110 shl 24)
+             val body = (tint and 0x00ffffff) or (148 shl 24)
+             paint.shader = LinearGradient(0f, 0f, 0f, height.toFloat(),
+-                intArrayOf(0x99f6fcff.toInt(), translucent, body,
++                intArrayOf(0x99f6fcff.toInt(), 0xc2f6fcff.toInt(),
++                    (tint and 0x00ffffff) or (84 shl 24), translucent, body,
+                     (tint and 0x00ffffff) or (112 shl 24), (tint and 0x00ffffff) or (10 shl 24)),
+-                floatArrayOf(0f, .45f, .64f, .79f, 1f), Shader.TileMode.CLAMP)
++                floatArrayOf(0f, .18f, .35f, .5f, .64f, .79f, 1f), Shader.TileMode.CLAMP)
++            rimPaint.shader = LinearGradient(0f, 0f, 0f, height.toFloat(),
++                intArrayOf(0xa6f6fcff.toInt(), (tint and 0x00ffffff) or (35 shl 24),
++                    (tint and 0x00ffffff) or (68 shl 24), tint and 0x00ffffff),
++                floatArrayOf(0f, .48f, .75f, 1f), Shader.TileMode.CLAMP)
+         }
+         canvas.drawPath(ink, paint)
++        canvas.drawPath(ink, rimPaint)
+     }
+ }
+--- a/packages/SystemUI/src/com/android/systemui/statusbar/notification/stack/NotificationStackScrollLayout.java
++++ b/packages/SystemUI/src/com/android/systemui/statusbar/notification/stack/NotificationStackScrollLayout.java
+@@ -2449,6 +2449,7 @@
+             if (firstHeight == 0) firstHeight = height;
+             else { secondHeight = height; break; }
+         }
++        mGtosHasSecondCard = secondHeight > 0;
+         if (firstHeight == 0) return safeBottom;
+         int compactBottom = getTopPadding() + lastOffset
+                 + (secondHeight > 0 ? Math.round(secondHeight * .5f) : firstHeight);
+@@ -2456,6 +2457,24 @@
+     }
+ 
+     private Boolean mGtosOriginalVerticalScrollbar;
++    private boolean mGtosHasSecondCard;
++    private final Paint mGtosListFadePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
++    private float mGtosFadeTop = -1f;
++    private float mGtosFadeBottom = -1f;
++
++    private void drawGtosListFade(Canvas canvas, float top, float bottom) {
++        if (mGtosFadeTop != top || mGtosFadeBottom != bottom) {
++            mGtosFadeTop = top;
++            mGtosFadeBottom = bottom;
++            mGtosListFadePaint.setXfermode(new android.graphics.PorterDuffXfermode(
++                    android.graphics.PorterDuff.Mode.DST_IN));
++            mGtosListFadePaint.setShader(new android.graphics.LinearGradient(0f, top, 0f, bottom,
++                    new int[] {0xffffffff, 0xffffffff, 0x00ffffff},
++                    new float[] {0f, .60f, 1f}, Shader.TileMode.CLAMP));
++        }
++        canvas.drawRect(0f, top, getWidth(), bottom, mGtosListFadePaint);
++    }
++
+ 
+     private boolean isScrollingEnabled() {
+         return mScrollingEnabled || (isGtosGlassLockscreenList() && !mQsFullScreen);
+@@ -6766,8 +6785,12 @@
+     @Override
+     protected void dispatchDraw(@NonNull Canvas canvas) {
+         final int glassClip = canvas.save();
+-        if (isGtosGlassLockscreenList() && !mLaunchingNotification) {
+-            canvas.clipRect(0, getTopPadding(), getWidth(), getGtosLockListBottom());
++        final boolean glassList = isGtosGlassLockscreenList() && !mLaunchingNotification;
++        final int glassBottom = glassList ? getGtosLockListBottom() : 0;
++        final boolean glassFade = glassList && mGtosHasSecondCard;
++        if (glassList) {
++            if (glassFade) canvas.saveLayer(0f, getTopPadding(), getWidth(), glassBottom, null);
++            canvas.clipRect(0, getTopPadding(), getWidth(), glassBottom);
+         }
+         if (mBlurEffect != null) {
+             spewLog("Applying blur RenderEffect to NotificationStackScrollLayout");
+@@ -6801,6 +6824,7 @@
+             }
+             super.dispatchDraw(canvas);
+         }
++        if (glassFade) drawGtosListFade(canvas, getTopPadding(), glassBottom);
+         canvas.restoreToCount(glassClip);
+     }
+ 

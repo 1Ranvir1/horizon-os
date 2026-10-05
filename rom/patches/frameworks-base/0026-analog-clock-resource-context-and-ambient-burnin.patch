@@ -1,0 +1,25 @@
+--- a/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/GtosGlassClockPainter.kt
++++ b/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/GtosGlassClockPainter.kt
+@@ -8,7 +8,7 @@
+ import java.util.Calendar
+ 
+ /** Reuse DeskClock's Home artwork. Native events/accessibility remain authoritative. */
+-internal class GtosGlassClockPainter(context: Context) {
++internal class GtosGlassClockPainter(private val context: Context) {
+     val enabled = context.resources.getIdentifier("config_gtosGlassControls", "bool", context.packageName).let {
+         it != 0 && context.resources.getBoolean(it)
+     }
+--- a/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/KeyguardRootView.kt
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/KeyguardRootView.kt
+@@ -72,7 +72,11 @@
+             blackPaint.color = android.graphics.Color.BLACK
+             blackPaint.alpha = (doze * 255).toInt()
+             canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), blackPaint)
++            val save = canvas.save()
++            // Sparse celestial objects share the clock's native burn-in translation.
++            canvas.translate(clockView?.translationX ?: 0f, clockView?.translationY ?: 0f)
+             ambientSky.draw(canvas, width.toFloat(), height.toFloat(), doze * .45f)
++            canvas.restoreToCount(save)
+         }
+         super.dispatchDraw(canvas)
+         val state = display?.state

@@ -1,0 +1,10 @@
+--- a/packages/SystemUI/res/raw/keep_homecontrols_sq.xml
++++ b/packages/SystemUI/res/raw/keep_homecontrols_sq.xml
+@@ -16,4 +16,4 @@
+   -->
+ 
+ <resources xmlns:tools="http://schemas.android.com/tools"
+-    tools:keep="@drawable/homecontrols_sq" />
+\ No newline at end of file
++    tools:keep="@drawable/homecontrols_sq,@drawable/gtos_analog_dial,@drawable/gtos_analog_hour,@drawable/gtos_analog_minute" />
+\ No newline at end of file

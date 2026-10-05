@@ -1,0 +1,47 @@
+--- a/packages/SystemUI/src/com/android/systemui/biometrics/ui/view/UdfpsTouchOverlay.kt
++++ b/packages/SystemUI/src/com/android/systemui/biometrics/ui/view/UdfpsTouchOverlay.kt
+@@ -40,7 +40,13 @@
+     // Some vendor composers recognize the main window buffer, not a SurfaceView child.
+     private val drawIlluminationInWindow =
+         context.resources.getBoolean(R.bool.config_udfpsDrawIlluminationInWindow)
+-    private val windowManager = context.getSystemService(WindowManager::class.java)!!
++    // The inflated view context may carry NotificationShade's parent-window token.
++    // Use the same system window manager as the outer touch overlay instead.
++    private var illuminationWindowManager: WindowManager? = null
++
++    fun setIlluminationWindowManager(manager: WindowManager) {
++        illuminationWindowManager = manager
++    }
+     private var illuminationWindow: View? = null
+     private var illuminationGeneration = 0
+     private val illuminationPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+@@ -89,7 +95,7 @@
+         }
+         illuminationWindow = illumination
+         try {
+-            windowManager.addView(illumination, params)
++            checkNotNull(illuminationWindowManager).addView(illumination, params)
+         } catch (e: RuntimeException) {
+             illuminationWindow = null
+             throw e
+@@ -98,7 +104,7 @@
+ 
+     private fun hideIlluminationWindow() {
+         ++illuminationGeneration
+-        illuminationWindow?.let { windowManager.removeViewImmediate(it) }
++        illuminationWindow?.let { checkNotNull(illuminationWindowManager).removeViewImmediate(it) }
+         illuminationWindow = null
+     }
+ 
+--- a/packages/SystemUI/src/com/android/systemui/biometrics/UdfpsControllerOverlay.kt
++++ b/packages/SystemUI/src/com/android/systemui/biometrics/UdfpsControllerOverlay.kt
+@@ -201,6 +201,9 @@
+                     (inflater.inflate(R.layout.udfps_touch_overlay, null, false)
+                             as UdfpsTouchOverlay)
+                         .apply {
++                            setIlluminationWindowManager(
++                                this@UdfpsControllerOverlay.windowManager
++                            )
+                             setUdfpsDisplayModeProvider(udfpsDisplayModeProvider)
+                             // This view overlaps the sensor area
+                             // prevent it from being selectable during a11y

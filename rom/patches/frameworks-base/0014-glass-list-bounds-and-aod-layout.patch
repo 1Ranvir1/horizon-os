@@ -1,0 +1,71 @@
+--- a/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/layout/sections/DefaultNotificationStackScrollLayoutSection.kt
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/layout/sections/DefaultNotificationStackScrollLayoutSection.kt
+@@ -75,6 +75,11 @@
+             connect(R.id.nssl_placeholder, START, PARENT_ID, START)
+             connect(R.id.nssl_placeholder, END, PARENT_ID, END)
+ 
++            if (context.resources.getBoolean(R.bool.config_gtosGlassControls)) {
++                // Moving the date above the clock must not move the list over the clock.
++                connect(R.id.nssl_placeholder, TOP, PARENT_ID, TOP,
++                    (context.resources.displayMetrics.heightPixels * .52f).toInt())
++            }
+             addNotificationPlaceholderBarrier(this)
+         }
+     }
+--- a/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/layout/sections/ClockSection.kt
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/layout/sections/ClockSection.kt
+@@ -150,7 +150,8 @@
+                 }
+             }
+             // Apply after the native face constraints so both awake clock sizes share this layout.
+-            if (context.resources.getBoolean(R.bool.config_gtosGlassControls)) {
++            if (context.resources.getBoolean(R.bool.config_gtosGlassControls)
++                    && keyguardClockViewModel.clockEventController.dozeAmount.value == 0f) {
+                 val metrics = context.resources.displayMetrics
+                 val side = (metrics.widthPixels * .06f).toInt()
+                 for (id in intArrayOf(ClockViewIds.LOCKSCREEN_CLOCK_VIEW_SMALL,
+@@ -266,10 +267,7 @@
+             // height when it goes beyond constraints; otherwise, it use WRAP_CONTENT
+             constrainHeight(ClockViewIds.LOCKSCREEN_CLOCK_VIEW_LARGE, WRAP_CONTENT)
+             constrainMaxHeight(ClockViewIds.LOCKSCREEN_CLOCK_VIEW_LARGE, 0)
+-            val smallClockHeight = if (context.resources.getBoolean(R.bool.config_gtosGlassControls))
+-                kotlin.math.max(context.resources.getDimensionPixelSize(clocksR.dimen.small_clock_height),
+-                    (context.resources.displayMetrics.heightPixels * .20f).toInt())
+-                else context.resources.getDimensionPixelSize(clocksR.dimen.small_clock_height)
++            val smallClockHeight = context.resources.getDimensionPixelSize(clocksR.dimen.small_clock_height)
+             constrainWidth(ClockViewIds.LOCKSCREEN_CLOCK_VIEW_SMALL, WRAP_CONTENT)
+             constrainHeight(
+                 ClockViewIds.LOCKSCREEN_CLOCK_VIEW_SMALL,
+--- a/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/layout/sections/KeyguardSliceViewSection.kt
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/layout/sections/KeyguardSliceViewSection.kt
+@@ -124,7 +124,8 @@
+                 ConstraintSet.BOTTOM,
+             )
+ 
+-            if (context.resources.getBoolean(R.bool.config_gtosGlassControls)) {
++            if (context.resources.getBoolean(R.bool.config_gtosGlassControls)
++                    && !keyguardInteractor.isDozing.value) {
+                 val side = (context.resources.displayMetrics.widthPixels * .06f).toInt()
+                 clear(R.id.keyguard_slice_view, ConstraintSet.TOP)
+                 connect(R.id.keyguard_slice_view, ConstraintSet.TOP, ConstraintSet.PARENT_ID,
+--- a/packages/SystemUI/src/com/android/systemui/keyguard/ui/binder/KeyguardClockViewBinder.kt
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/ui/binder/KeyguardClockViewBinder.kt
+@@ -103,6 +103,18 @@
+                             lastClock = null
+                         }
+ 
++                    if (keyguardRootView.resources.getBoolean(com.android.systemui.res.R.bool.config_gtosGlassControls)) {
++                        launch {
++                            viewModel.clockEventController.dozeAmount
++                                .map { it == 0f }
++                                .distinctUntilChanged()
++                                .collect {
++                                    // Reapply native AOD geometry and the awake reference layout at endpoints.
++                                    blueprintInteractor.refreshBlueprint(Type.DefaultTransition)
++                                }
++                        }
++                    }
++
+                     launch {
+                         viewModel.clockSize.collect { clockSize ->
+                             updateBurnInLayer(keyguardRootView, viewModel, clockSize)

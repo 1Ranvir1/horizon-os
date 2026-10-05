@@ -1,0 +1,100 @@
+--- a/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/GtosGlassClockPainter.kt
++++ b/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/GtosGlassClockPainter.kt
+@@ -21,6 +21,10 @@
+         textSize = 100f
+     }
+     private val ink = Path()
++    private val hoursPath = Path()
++    private val minutesPath = Path()
++    private val hourBounds = RectF()
++    private val minuteBounds = RectF()
+     private val sourceBounds = RectF()
+     private val targetBounds = RectF()
+     private val matrix = Matrix()
+@@ -36,21 +40,53 @@
+             lastWidth = width
+             lastHeight = height
+             ink.reset()
+-            paint.getTextPath(text, 0, text.length, 0f, 0f, ink)
+-            ink.computeBounds(sourceBounds, true)
+-            if (sourceBounds.isEmpty) return
+-            targetBounds.set(width * .025f, height * .03f, width * .975f, height * .97f)
+-            matrix.setRectToRect(sourceBounds, targetBounds, Matrix.ScaleToFit.FILL)
+-            ink.transform(matrix)
++            val separator = text.indexOf(':')
++            if (separator > 0 && separator < text.lastIndex) {
++                hoursPath.reset()
++                minutesPath.reset()
++                paint.getTextPath(text, 0, separator, 0f, 0f, hoursPath)
++                paint.getTextPath(text, separator + 1, text.length, 0f, 0f, minutesPath)
++                hoursPath.computeBounds(hourBounds, true)
++                minutesPath.computeBounds(minuteBounds, true)
++                if (hourBounds.isEmpty || minuteBounds.isEmpty) return
++                val top = kotlin.math.min(hourBounds.top, minuteBounds.top)
++                val bottom = kotlin.math.max(hourBounds.bottom, minuteBounds.bottom)
++                val gap = width * .14f
++                val sx = width * .81f / (hourBounds.width() + minuteBounds.width())
++                val sy = height * .94f / (bottom - top)
++                val x = width * .025f
++                val y = height * .03f
++                matrix.setScale(sx, sy)
++                matrix.postTranslate(x - hourBounds.left * sx, y - top * sy)
++                hoursPath.transform(matrix)
++                val minuteX = x + hourBounds.width() * sx + gap
++                matrix.setScale(sx, sy)
++                matrix.postTranslate(minuteX - minuteBounds.left * sx, y - top * sy)
++                minutesPath.transform(matrix)
++                ink.addPath(hoursPath)
++                ink.addPath(minutesPath)
++                // Round dots stay centered around half the clock height.
++                val dotX = x + hourBounds.width() * sx + gap / 2f
++                val radius = width * .019f
++                ink.addCircle(dotX, height * .32f, radius, Path.Direction.CW)
++                ink.addCircle(dotX, height * .68f, radius, Path.Direction.CW)
++            } else {
++                paint.getTextPath(text, 0, text.length, 0f, 0f, ink)
++                ink.computeBounds(sourceBounds, true)
++                if (sourceBounds.isEmpty) return
++                targetBounds.set(width * .025f, height * .03f, width * .975f, height * .97f)
++                matrix.setRectToRect(sourceBounds, targetBounds, Matrix.ScaleToFit.FILL)
++                ink.transform(matrix)
++            }
+             lastTint = 0
+         }
+         val tint = ctx.getColor(android.R.color.system_accent1_100)
+         if (tint != lastTint) {
+             lastTint = tint
+-            val translucent = (tint and 0x00ffffff) or (164 shl 24)
+-            val body = (tint and 0x00ffffff) or (194 shl 24)
++            val translucent = (tint and 0x00ffffff) or (110 shl 24)
++            val body = (tint and 0x00ffffff) or (148 shl 24)
+             paint.shader = LinearGradient(0f, 0f, 0f, height.toFloat(),
+-                intArrayOf(0xf2f6fcff.toInt(), translucent, body, 0xf0f6fcff.toInt()),
++                intArrayOf(0x99f6fcff.toInt(), translucent, body, 0xbbf6fcff.toInt()),
+                 floatArrayOf(0f, .45f, .58f, 1f), Shader.TileMode.CLAMP)
+         }
+         canvas.drawPath(ink, paint)
+--- a/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/KeyguardRootView.kt
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/KeyguardRootView.kt
+@@ -73,17 +73,18 @@
+         }
+         val t = android.os.SystemClock.uptimeMillis() / 1000f
+         val exit = (1f - alpha).coerceIn(0f, 1f)
+-        val cw = width * if (front) .65f else .83f
++        val cw = width * if (front) .76f else .83f
+         val ch = cw * bitmap.height / bitmap.width
+         for (i in 0..1) {
+-            val base = width * (if (i == 0) -.04f else 1.04f)
++            val base = width * (if (front) (if (i == 0) -.03f else .80f)
++                else (if (i == 0) .22f else .98f))
+             val cx = base + kotlin.math.sin(t * .025f + i * 2f) * width * .08f
+             val direction = if (cx < width / 2f) -1f else 1f
+             val x = cx + direction * exit * (width + cw) * .8f
+             val cy = if (front) clockRect.bottom - clockRect.height() * .18f
+                 else height * (.22f + i * .09f)
+             cloudRect.set(x - cw / 2, cy - ch / 2, x + cw / 2, cy + ch / 2)
+-            cloudPaint.alpha = if (front) 56 else 64
++            cloudPaint.alpha = if (front) (if (i == 0) 80 else 110) else 64
+             canvas.drawBitmap(bitmap, null, cloudRect, cloudPaint)
+         }
+     }

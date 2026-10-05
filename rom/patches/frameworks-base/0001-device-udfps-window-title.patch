@@ -1,0 +1,28 @@
+diff --git a/packages/SystemUI/res/values/config.xml b/packages/SystemUI/res/values/config.xml
+index e0bc1ec0e..8c4708cf7 100644
+--- a/packages/SystemUI/res/values/config.xml
++++ b/packages/SystemUI/res/values/config.xml
+@@ -1186,4 +1186,6 @@
+ 
+     <!-- Indicates whether the tapping to open qs panel is supported -->
+     <bool name="config_statusBarTapToExpandShade">false</bool>
++    <!-- Optional vendor-composer fingerprint illumination window name. -->
++    <string name="config_udfpsVendorWindowTitle" translatable="false"></string>
+ </resources>
+diff --git a/packages/SystemUI/src/com/android/systemui/biometrics/UdfpsControllerOverlay.kt b/packages/SystemUI/src/com/android/systemui/biometrics/UdfpsControllerOverlay.kt
+index a80a96dc5..6c70e7043 100644
+--- a/packages/SystemUI/src/com/android/systemui/biometrics/UdfpsControllerOverlay.kt
++++ b/packages/SystemUI/src/com/android/systemui/biometrics/UdfpsControllerOverlay.kt
+@@ -138,7 +138,11 @@ constructor(
+                 PixelFormat.TRANSLUCENT,
+             )
+             .apply {
+-                title = TAG
++                // Some vendor composers identify the fingerprint illumination layer by name.
++                // Keep the standard name unless the device explicitly supplies its vendor name.
++                title = context.resources.getString(
++                    com.android.systemui.res.R.string.config_udfpsVendorWindowTitle
++                ).ifEmpty { TAG }
+                 fitInsetsTypes = 0
+                 gravity = android.view.Gravity.TOP or android.view.Gravity.LEFT
+                 layoutInDisplayCutoutMode =

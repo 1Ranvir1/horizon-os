@@ -1,0 +1,68 @@
+--- a/packages/SystemUI/src/com/android/systemui/statusbar/notification/stack/NotificationStackScrollLayout.java
++++ b/packages/SystemUI/src/com/android/systemui/statusbar/notification/stack/NotificationStackScrollLayout.java
+@@ -2317,6 +2317,10 @@
+ 
+     public ExpandableView getChildAtRawPosition(float touchX, float touchY) {
+         getLocationOnScreen(mTempInt2);
++        if (isGtosGlassLockscreenList()) {
++            float localY = touchY - mTempInt2[1];
++            if (localY < getTopPadding() || localY > getGtosLockListBottom()) return null;
++        }
+         return getChildAtPosition(touchX - mTempInt2[0], touchY - mTempInt2[1]);
+     }
+ 
+@@ -2407,6 +2411,12 @@
+     private boolean isGtosGlassLockscreenList() {
+         return getResources().getBoolean(com.android.systemui.res.R.bool.config_gtosGlassControls)
+                 && onKeyguard() && !mAmbientState.isDozing();
++    }
++
++    private int getGtosLockListBottom() {
++        getLocationOnScreen(mTempInt2);
++        return Math.min(getHeight(), (int) (getResources().getDisplayMetrics().heightPixels * .855f)
++                - mTempInt2[1]);
+     }
+ 
+     private boolean isScrollingEnabled() {
+@@ -2788,7 +2798,8 @@
+         if (!isExpanded() && mInHeadsUpPinnedMode) {
+             contentHeight = mHeadsUpInset + getTopHeadsUpPinnedHeight();
+         }
+-        int scrollRange = Math.max(0, contentHeight - mMaxLayoutHeight);
++        int layoutBottom = isGtosGlassLockscreenList() ? getGtosLockListBottom() : mMaxLayoutHeight;
++        int scrollRange = Math.max(0, contentHeight - layoutBottom);
+         int imeInset = getImeInset();
+         scrollRange += Math.min(imeInset, Math.max(0, contentHeight - (getHeight() - imeInset)));
+         if (scrollRange > 0) {
+@@ -6705,6 +6716,10 @@
+ 
+     @Override
+     protected void dispatchDraw(@NonNull Canvas canvas) {
++        final int glassClip = canvas.save();
++        if (isGtosGlassLockscreenList() && !mLaunchingNotification) {
++            canvas.clipRect(0, getTopPadding(), getWidth(), getGtosLockListBottom());
++        }
+         if (mBlurEffect != null) {
+             spewLog("Applying blur RenderEffect to NotificationStackScrollLayout");
+             // reuse the cached RenderNode to blur
+@@ -6737,6 +6752,7 @@
+             }
+             super.dispatchDraw(canvas);
+         }
++        canvas.restoreToCount(glassClip);
+     }
+ 
+     private void applyClipToCanvas(Canvas canvas) {
+--- a/packages/SystemUI/src/com/android/keyguard/KeyguardSliceView.java
++++ b/packages/SystemUI/src/com/android/keyguard/KeyguardSliceView.java
+@@ -156,7 +156,9 @@
+         final int startIndex = mHasHeader ? 1 : 0; // First item is header; skip it
+         mRow.setVisibility(subItemsCount > 0 ? VISIBLE : GONE);
+         LinearLayout.LayoutParams layoutParams = (LayoutParams) mRow.getLayoutParams();
+-        layoutParams.gravity = Gravity.START;
++        boolean glassDate = getResources().getBoolean(R.bool.config_gtosGlassControls);
++        layoutParams.gravity = glassDate ? Gravity.CENTER_HORIZONTAL : Gravity.START;
++        mRow.setGravity(glassDate ? Gravity.CENTER_HORIZONTAL : Gravity.START);
+         mRow.setLayoutParams(layoutParams);
+ 
+         for (int i = startIndex; i < subItemsCount; i++) {

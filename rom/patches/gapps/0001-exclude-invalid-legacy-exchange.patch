@@ -1,0 +1,12 @@
+diff --git a/common/common-vendor.mk b/common/common-vendor.mk
+index b1d0630..dac6973 100644
+--- a/common/common-vendor.mk
++++ b/common/common-vendor.mk
+@@ -12,7 +12,6 @@ PRODUCT_PACKAGES += \
+     GoogleFeedback \
+     GooglePartnerSetup \
+     GoogleServicesFramework \
+-    PrebuiltExchange3Google \
+     com.google.android.dialer.support \
+     com.google.android.dialer.support.xml \
+     d2d_cable_migration_feature.xml \

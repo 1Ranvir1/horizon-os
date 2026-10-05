@@ -1,0 +1,78 @@
+diff --git a/src/com/android/launcher3/widget/LauncherAppWidgetHostView.java b/src/com/android/launcher3/widget/LauncherAppWidgetHostView.java
+index 129f806..c9cc154 100644
+--- a/src/com/android/launcher3/widget/LauncherAppWidgetHostView.java
++++ b/src/com/android/launcher3/widget/LauncherAppWidgetHostView.java
+@@ -292,6 +292,7 @@ public class LauncherAppWidgetHostView extends BaseLauncherAppWidgetHostView
+     protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+         super.onLayout(changed, left, top, right, bottom);
+         mIsScrollable = isTaggedAsScrollable() || checkScrollableRecursively(this);
++        SearchWidgetTheme.apply(this);
+     }
+ 
+     /**
+diff --git a/src/com/android/launcher3/widget/SearchWidgetTheme.java b/src/com/android/launcher3/widget/SearchWidgetTheme.java
+new file mode 100644
+index 0000000..8f2b5dd
+--- /dev/null
++++ b/src/com/android/launcher3/widget/SearchWidgetTheme.java
+@@ -0,0 +1,60 @@
++package com.android.launcher3.widget;
++
++import android.appwidget.AppWidgetProviderInfo;
++import android.graphics.PorterDuff;
++import android.graphics.drawable.Drawable;
++import android.view.View;
++import android.view.ViewGroup;
++
++/** Theme only the wide search-widget background; leave buttons and icons untouched. */
++final class SearchWidgetTheme {
++    private SearchWidgetTheme() {}
++
++    static void apply(LauncherAppWidgetHostView host) {
++        AppWidgetProviderInfo info = host.getAppWidgetInfo();
++        if (info == null || info.provider == null
++                || !"com.google.android.googlequicksearchbox".equals(
++                        info.provider.getPackageName())
++                || !info.provider.getClassName().endsWith("SearchWidgetProvider")) {
++            return;
++        }
++        int tint = host.getContext().getColor(android.R.color.system_neutral1_800);
++        float maxHeight = 96 * host.getResources().getDisplayMetrics().density;
++        tintBackgrounds(host, host.getWidth(), maxHeight, tint);
++    }
++
++    private static void tintBackgrounds(View view, int hostWidth, float maxHeight, int tint) {
++        // Geometry guards exclude small icon/button backgrounds and unrelated widgets.
++        if (hostWidth > 0 && view.getWidth() >= hostWidth * 0.75f
++                && view.getHeight() > 0 && view.getHeight() <= maxHeight
++                && view.getWidth() >= view.getHeight() * 3) {
++            Drawable background = view.getBackground();
++            if (background != null) {
++                background = background.mutate();
++                background.setColorFilter(tint, PorterDuff.Mode.SRC_IN);
++                background.setAlpha(100);
++            }
++        }
++        // Google's current widget paints its pill as an image, not a View background.
++        if (view instanceof android.widget.ImageView && view.getId() != View.NO_ID) {
++            String name = "";
++            try { name = view.getResources().getResourceEntryName(view.getId()); }
++            catch (android.content.res.Resources.NotFoundException ignored) { }
++            if (name.startsWith("googleapp_search_widget_background")) {
++                android.widget.ImageView image = (android.widget.ImageView) view;
++                if (name.contains("protection")) {
++                    image.setImageAlpha(0);
++                } else {
++                    image.setImageTintList(android.content.res.ColorStateList.valueOf(tint));
++                    image.setImageAlpha(100);
++                }
++            }
++        }
++        if (view instanceof ViewGroup) {
++            ViewGroup group = (ViewGroup) view;
++            for (int i = 0; i < group.getChildCount(); i++) {
++                tintBackgrounds(group.getChildAt(i), hostWidth, maxHeight, tint);
++            }
++        }
++    }
++}

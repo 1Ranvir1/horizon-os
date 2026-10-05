@@ -1,0 +1,21 @@
+--- a/packages/SystemUI/src/com/android/systemui/biometrics/AuthRippleView.kt
++++ b/packages/SystemUI/src/com/android/systemui/biometrics/AuthRippleView.kt
+@@ -87,7 +87,9 @@
+     init {
+         rippleShader.rawProgress = 0f
+         rippleShader.pixelDensity = resources.displayMetrics.density
+-        rippleShader.sparkleStrength = RIPPLE_SPARKLE_STRENGTH
++        // Device theme changes only the visual shader, never biometric authentication.
++        rippleShader.sparkleStrength = if (resources.getBoolean(
++            com.android.systemui.res.R.bool.config_gtosSmoothAuthRipple)) 0f else RIPPLE_SPARKLE_STRENGTH
+         updateRippleFadeParams()
+         ripplePaint.shader = rippleShader
+         setLockScreenColor(Utils.getColorAttr(context,
+--- /dev/null
++++ b/packages/SystemUI/res/values/gtos_auth_ripple.xml
+@@ -0,0 +1,5 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <!-- Opt-in grain-free fingerprint unlock wave. -->
++    <bool name="config_gtosSmoothAuthRipple">false</bool>
++</resources>

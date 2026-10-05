@@ -1,0 +1,320 @@
+--- a/quickstep/src/com/android/launcher3/uioverrides/QuickstepLauncher.java
++++ b/quickstep/src/com/android/launcher3/uioverrides/QuickstepLauncher.java
+@@ -326,7 +326,7 @@
+ 
+     @Override
+     protected LauncherOverlayManager getDefaultOverlay() {
+-        return new OverlayCallbackImpl(this);
++        return new WeatherOverlay(this);
+     }
+ 
+     @Override
+@@ -336,6 +336,7 @@
+         mOverviewBlurEnabled = isOverviewBackgroundBlurEnabled();
+         getTheme().applyStyle(getOverviewBlurStyleResId(), true);
+         super.setupViews();
++        AlphabetRail.install(this);
+         mDepthController.setSurfaceTransactionApplier(getRootView());
+ 
+         mActionsView = findViewById(R.id.overview_actions_view);
+--- a/AndroidManifest-common.xml
++++ b/AndroidManifest-common.xml
+@@ -31,6 +31,8 @@
+     with some minor changed based on the derivative app.
+     -->
+ 
++    <uses-permission android:name="android.permission.INTERNET" />
++    <uses-permission android:name="dev.gtos.launcher.permission.UPDATE_SKY" />
+     <uses-permission android:name="android.permission.CALL_PHONE" />
+     <uses-permission android:name="android.permission.SET_WALLPAPER" />
+     <uses-permission android:name="android.permission.SET_WALLPAPER_HINTS" />
+--- /dev/null
++++ b/quickstep/src/com/android/launcher3/uioverrides/WeatherOverlay.java
+@@ -0,0 +1,240 @@
++package com.android.launcher3.uioverrides;
++
++import android.animation.ValueAnimator;
++import android.app.BroadcastOptions;
++import android.content.ComponentName;
++import android.content.Intent;
++import android.graphics.PixelFormat;
++import android.net.Uri;
++import android.view.Gravity;
++import android.view.MotionEvent;
++import android.view.View;
++import android.view.WindowManager;
++import android.view.animation.DecelerateInterpolator;
++import android.webkit.JavascriptInterface;
++import android.webkit.WebResourceRequest;
++import android.webkit.WebSettings;
++import android.webkit.WebView;
++import android.webkit.WebViewClient;
++import com.android.launcher3.Launcher;
++import com.android.systemui.plugins.shared.LauncherOverlayManager;
++import org.json.JSONObject;
++
++/** Local WeatherGPT panel using the existing Trebuchet minus-one-page contract. */
++public final class WeatherOverlay implements LauncherOverlayManager,
++        LauncherOverlayManager.LauncherOverlayTouchProxy {
++    private static final String HOST = "weathergpt-7jyp.onrender.com";
++    private final Launcher launcher;
++    private final WindowManager windows;
++    private WebView web;
++    private WindowManager.LayoutParams layout;
++    private LauncherOverlayCallbacks callbacks;
++    private ValueAnimator animator;
++    private boolean attached;
++    private float progress, velocity, downX, downY, startProgress;
++    private int page;
++    private boolean horizontal;
++    private boolean closingRight;
++    private boolean destroyed;
++    private int blurStep = -1;
++    private long navigatingUntil;
++
++    public WeatherOverlay(Launcher launcher) {
++        this.launcher = launcher;
++        windows = launcher.getSystemService(WindowManager.class);
++        android.content.SharedPreferences prefs = com.android.launcher3.LauncherPrefs.getPrefs(launcher);
++        if (!prefs.getBoolean("gtos_weather_home_initialized", false)) prefs.edit()
++                .putBoolean(com.android.launcher3.SessionCommitReceiver.ADD_ICON_PREFERENCE_KEY, true)
++                .putBoolean("gtos_weather_home_initialized", true).apply();
++    }
++    @Override public void onAttachedToWindow() { launcher.setLauncherOverlay(this); }
++    @Override public void onActivityStarted() { launcher.getRootView().postDelayed(() -> { if (!destroyed) ensureView(); }, 500); }
++    @Override public void setOverlayCallbacks(LauncherOverlayCallbacks value) { callbacks = value; }
++    private void ensureView() {
++        if (web != null) return;
++        web = new WebView(launcher);
++        web.setBackgroundColor(0xff89b6dc);
++        web.getSettings().setJavaScriptEnabled(true);
++        web.getSettings().setDomStorageEnabled(true);
++        web.getSettings().setUseWideViewPort(true);
++        web.getSettings().setLoadWithOverviewMode(true);
++        web.getSettings().setAllowFileAccess(false);
++        web.getSettings().setAllowContentAccess(false);
++        web.getSettings().setGeolocationEnabled(false);
++        web.getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
++        web.addJavascriptInterface(new SkyBridge(), "GTOSSky");
++        web.setWebViewClient(new WebViewClient() {
++            @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
++                Uri uri = request.getUrl();
++                if ("https".equals(uri.getScheme()) && HOST.equals(uri.getHost())) return false;
++                if (request.isForMainFrame() && ("https".equals(uri.getScheme()) || "http".equals(uri.getScheme()))) {
++                    try { launcher.startActivity(new Intent(Intent.ACTION_VIEW, uri)); } catch (RuntimeException ignored) { }
++                }
++                return request.isForMainFrame();
++            }
++            @Override public void onPageFinished(WebView view, String url) {
++                if (!HOST.equals(Uri.parse(url).getHost())) return;
++                view.evaluateJavascript(SCRIPT, null);
++            }
++        });
++        web.setOnApplyWindowInsetsListener((view, insets) -> {
++            android.graphics.Insets bars = insets.getInsets(android.view.WindowInsets.Type.systemBars());
++            android.graphics.Insets ime = insets.getInsets(android.view.WindowInsets.Type.ime());
++            view.setPadding(bars.left, bars.top, bars.right, Math.max(bars.bottom, ime.bottom));
++            return insets;
++        });
++        web.setOnTouchListener((view, event) -> {
++            if (event.getPointerCount() > 1) { horizontal = false; return false; }
++            switch (event.getActionMasked()) {
++                case MotionEvent.ACTION_DOWN:
++                    if (android.os.SystemClock.uptimeMillis() < navigatingUntil) web.evaluateJavascript(
++                            "document.querySelector('.app-pages')?.scrollTo({left:" + page
++                            + "*document.querySelector('.app-pages').clientWidth,behavior:'instant'})", null);
++                    downX = event.getRawX(); downY = event.getRawY(); horizontal = false; startProgress = progress; closingRight = false;
++                    return false;
++                case MotionEvent.ACTION_MOVE:
++                    float dx = event.getRawX() - downX, dy = event.getRawY() - downY;
++                    boolean mapEdge = downY < dp(100) || downX < dp(24) || downX > web.getWidth() - dp(24);
++                    if (!horizontal && Math.abs(dx) > dp(24) && Math.abs(dx) > Math.abs(dy) * 1.5f
++                            && downY < web.getHeight() * .85f) {
++                        horizontal = true;
++                        MotionEvent cancel = MotionEvent.obtain(event); cancel.setAction(MotionEvent.ACTION_CANCEL);
++                        web.onTouchEvent(cancel); cancel.recycle();
++                    }
++                    if (horizontal && page == 0 && dx > 0) { closingRight = true; setProgress(startProgress - dx / width()); }
++                    return horizontal;
++                case MotionEvent.ACTION_UP:
++                    if (!horizontal) return false;
++                    float drag = event.getRawX() - downX;
++                    if (page == 0 && drag > 0) animateTo(drag > dp(60) ? 0 : 1, 240);
++                    else if (Math.abs(drag) > dp(60)) {
++                        page = Math.max(0, Math.min(2, page + (drag < 0 ? 1 : -1)));
++                        navigatingUntil = android.os.SystemClock.uptimeMillis() + 500;
++                        web.evaluateJavascript("document.querySelector('.app-pages')?.scrollTo({left:" + page
++                                + "*document.querySelector('.app-pages').clientWidth,behavior:'smooth'})", null);
++                    }
++                    horizontal = false; return true;
++                case MotionEvent.ACTION_CANCEL:
++                    if (horizontal && progress < 1) animateTo(1, 220);
++                    horizontal = false; return false;
++                default: return horizontal;
++            }
++        });
++        web.setOnKeyListener((view, keyCode, event) -> {
++            if (keyCode == android.view.KeyEvent.KEYCODE_BACK && event.getAction() == android.view.KeyEvent.ACTION_UP) {
++                if (page > 0) { page--; web.evaluateJavascript("document.querySelector('.app-pages')?.scrollTo({left:"
++                    + page + "*document.querySelector('.app-pages').clientWidth,behavior:'smooth'})", null); }
++                else hideOverlay(true);
++                return true;
++            }
++            return false;
++        });
++        web.loadUrl("https://" + HOST + "/");
++    }
++    private int dp(int value) { return Math.round(value * launcher.getResources().getDisplayMetrics().density); }
++    private int width() { return Math.max(1, launcher.getRootView().getWidth()); }
++    private void setProgress(float value) {
++        progress = Math.max(0, Math.min(1, value));
++        ensureView();
++        if (progress > 0 && !attached) {
++            layout = new WindowManager.LayoutParams(width(), WindowManager.LayoutParams.MATCH_PARENT,
++                    WindowManager.LayoutParams.TYPE_APPLICATION_PANEL, WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
++                    | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
++                    | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
++                    | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE, PixelFormat.TRANSLUCENT);
++            layout.token = launcher.getWindow().getDecorView().getWindowToken();
++            layout.gravity = Gravity.TOP | Gravity.LEFT;
++            layout.setTitle("WeatherGPT Home panel");
++            windows.addView(web, layout); attached = true;
++        }
++        if (attached) {
++            web.setTranslationX((closingRight ? 1 - progress : progress - 1) * width());
++            web.setAlpha(progress * progress * (3 - 2 * progress));
++            int flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
++                    | (progress < 1 ? WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE : 0)
++                    // Keep the Home finger stream until its release. A full-size moving
++                    // panel otherwise steals it as soon as the window is added.
++                    | (progress < 1 && !horizontal ? WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE : 0);
++            if (layout.flags != flags) { layout.flags = flags; windows.updateViewLayout(web, layout); }
++        }
++        launcher.getDragLayer().setTranslationX(progress * width() * .08f * (closingRight ? -1 : 1));
++        launcher.getDragLayer().setAlpha(1 - progress * .12f);
++        int nextBlur = Math.round((float) Math.sin(Math.PI * progress) * 8);
++        if (nextBlur != blurStep) {
++            blurStep = nextBlur;
++            launcher.getDragLayer().setRenderEffect(nextBlur == 0 ? null : android.graphics.RenderEffect.createBlurEffect(
++                    nextBlur, nextBlur, android.graphics.Shader.TileMode.CLAMP));
++        }
++        if (callbacks != null) callbacks.onOverlayScrollChanged(progress);
++        if (progress == 0 && attached && !horizontal) {
++            windows.removeViewImmediate(web); attached = false;
++            page = 0;
++            web.evaluateJavascript("document.querySelector('.app-pages')?.scrollTo({left:0,behavior:'instant'})", null);
++        }
++    }
++    private void animateTo(float target, int duration) {
++        if (animator != null) animator.cancel();
++        animator = ValueAnimator.ofFloat(progress, target);
++        animator.setDuration(duration); animator.setInterpolator(new DecelerateInterpolator());
++        animator.addUpdateListener(a -> setProgress((float) a.getAnimatedValue())); animator.start();
++    }
++    @Override public void onFlingVelocity(float value) { velocity = value; }
++    @Override public void onOverlayMotionEvent(MotionEvent event, float scrollProgress) {
++        if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
++            if (animator != null) animator.cancel(); velocity = 0; closingRight = false; ensureView();
++        } else if (event.getActionMasked() == MotionEvent.ACTION_MOVE) setProgress(scrollProgress);
++        else if (event.getActionMasked() == MotionEvent.ACTION_UP) animateTo(
++                progress > .3f || (progress > .08f && Math.abs(velocity) > dp(700)) ? 1 : 0, 280);
++        else if (event.getActionMasked() == MotionEvent.ACTION_CANCEL) animateTo(0, 220);
++    }
++    @Override public void openOverlay() { animateTo(1, 280); }
++    @Override public void hideOverlay(boolean animate) { hideOverlay(animate ? 280 : 0); }
++    @Override public void hideOverlay(int duration) { if (web != null) animateTo(0, duration); }
++    @Override public void onActivityResumed() {
++        if (!launcher.getWorkspace().hasOverlay()) launcher.setLauncherOverlay(this);
++        if (web != null) web.onResume();
++    }
++    @Override public void dump(String prefix, java.io.PrintWriter writer) {
++        writer.println(prefix + "WeatherGPT overlay: attached=" + attached + " progress=" + progress
++                + " page=" + page + " registered=" + launcher.getWorkspace().hasOverlay());
++    }
++    @Override public void onActivityPaused() { if (web != null) web.onPause(); }
++    @Override public void onDetachedFromWindow() { hideOverlay(0); }
++    @Override public void onActivityDestroyed() {
++        destroyed = true;
++        if (animator != null) animator.cancel();
++        launcher.getDragLayer().setTranslationX(0); launcher.getDragLayer().setAlpha(1); launcher.getDragLayer().setRenderEffect(null);
++        if (attached) windows.removeViewImmediate(web);
++        if (web != null) { web.removeJavascriptInterface("GTOSSky"); web.stopLoading(); web.destroy(); }
++        web = null; attached = false;
++    }
++    public final class SkyBridge {
++        @JavascriptInterface public void navigation(int index) { if (index >= 0 && index <= 2) launcher.runOnUiThread(() -> {
++            if (android.os.SystemClock.uptimeMillis() >= navigatingUntil && !horizontal) page = index;
++        }); }
++        @JavascriptInterface public void update(String value) {
++            if (value.length() > 2048) return;
++            try {
++                JSONObject data = new JSONObject(value);
++                double lat = data.getDouble("latitude"), lon = data.getDouble("longitude");
++                if (!Double.isFinite(lat) || !Double.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return;
++                String place = data.optString("place");
++                Intent intent = new Intent().setComponent(new ComponentName("dev.gtos.launcher", "dev.gtos.launcher.design.SkyUpdateReceiver"))
++                    .putExtra("latitude", lat).putExtra("longitude", lon).putExtra("place", place.substring(0, Math.min(100, place.length())))
++                    .putExtra("code", data.optInt("code", -1))
++                    .putExtra("wind", data.optDouble("wind", 0));
++                launcher.sendBroadcast(intent, null, BroadcastOptions.makeBasic().setShareIdentityEnabled(true).toBundle());
++            } catch (Exception ignored) { }
++        }
++    }
++    private static final String SCRIPT = """
++        (()=>{if(window.__gtosSkyConnected)return;window.__gtosSkyConnected=true;
++        const sync=()=>{try{if(typeof locationChoice==='undefined'||!locationChoice)return;
++          GTOSSky.update(JSON.stringify({latitude:locationChoice.latitude,longitude:locationChoice.longitude,
++          place:locationChoice.name,code:typeof forecast!=='undefined'?forecast?.current?.weather_code??-1:-1,
++          wind:typeof forecast!=='undefined'?forecast?.current?.wind_speed_10m??0:0}));}catch(_){}};
++        addEventListener('weather-location-changed',sync);addEventListener('weather-data-changed',sync);
++        const p=document.querySelector('.app-pages');const nav=()=>{if(p?.clientWidth)GTOSSky.navigation(Math.round(p.scrollLeft/p.clientWidth))};
++        p?.addEventListener('scroll',nav,{passive:true});nav();sync();})();
++        """;
++}
+--- /dev/null
++++ b/quickstep/src/com/android/launcher3/uioverrides/AlphabetRail.java
+@@ -0,0 +1,44 @@
++package com.android.launcher3.uioverrides;
++
++import android.view.Gravity;
++import android.widget.LinearLayout;
++import android.widget.RelativeLayout;
++import android.widget.TextView;
++import com.android.launcher3.Launcher;
++import com.android.launcher3.allapps.AllAppsRecyclerView;
++import com.android.launcher3.allapps.BaseAllAppsAdapter;
++import java.util.List;
++
++/** Accessible letter buttons jump within the active personal/work/search catalog. */
++public final class AlphabetRail {
++    public static void install(Launcher launcher) {
++        float density = launcher.getResources().getDisplayMetrics().density;
++        LinearLayout rail = new LinearLayout(launcher); rail.setOrientation(LinearLayout.VERTICAL);
++        RelativeLayout.LayoutParams params = new RelativeLayout.LayoutParams(Math.round(28 * density), -1);
++        params.addRule(RelativeLayout.ALIGN_PARENT_END);
++        params.topMargin = Math.round(145 * density); params.bottomMargin = Math.round(42 * density);
++        launcher.getAppsView().addView(rail, params);
++        for (char letter : "#ABCDEFGHIJKLMNOPQRSTUVWXYZ".toCharArray()) {
++            TextView button = new TextView(launcher); button.setText(String.valueOf(letter));
++            button.setTextSize(11); button.setGravity(Gravity.CENTER);
++            button.setTextColor(0xff9eabc0); button.setContentDescription("Jump to " + letter);
++            rail.addView(button, new LinearLayout.LayoutParams(-1, 0, 1));
++            button.setOnClickListener(v -> {
++                AllAppsRecyclerView list = launcher.getAppsView().getActiveRecyclerView();
++                if (list == null || list.getApps() == null) return;
++                List<BaseAllAppsAdapter.AdapterItem> items = list.getApps().getAdapterItems();
++                for (int i = 0; i < items.size(); i++) {
++                    if (items.get(i).itemInfo == null) continue;
++                    String title = items.get(i).itemInfo.title.toString();
++                    if (title.isEmpty()) continue;
++                    char first = Character.toUpperCase(title.charAt(0));
++                    if ((letter == '#' && (first < 'A' || first > 'Z')) || first == letter) {
++                        if (list.getLayoutManager() instanceof androidx.recyclerview.widget.LinearLayoutManager manager) manager.scrollToPositionWithOffset(i, 0);
++                        else list.scrollToPosition(i);
++                        break;
++                    }
++                }
++            });
++        }
++    }
++}

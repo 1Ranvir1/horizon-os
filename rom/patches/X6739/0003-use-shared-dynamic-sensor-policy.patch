@@ -1,0 +1,22 @@
+diff --git a/sepolicy/vendor/property.te b/sepolicy/vendor/property.te
+--- a/sepolicy/vendor/property.te
++++ b/sepolicy/vendor/property.te
+@@ -1,5 +1,2 @@
+-# Dynamic sensor
+-vendor_internal_prop(vendor_dynamic_sensor_prop);
+-
+ # HWC
+ vendor_public_prop(vendor_hwc_prop)
+diff --git a/sepolicy/vendor/property_contexts b/sepolicy/vendor/property_contexts
+--- a/sepolicy/vendor/property_contexts
++++ b/sepolicy/vendor/property_contexts
+@@ -6,9 +6,6 @@
+ ro.vendor.camera.res.fmq.size               u:object_r:vendor_camera_prop:s0
+ vendor.debug.seninf.hs_trail                u:object_r:vendor_mtk_camera_prop:s0
+ 
+-# Dynamic sensor
+-vendor.dynamic_sensor.                          u:object_r:vendor_dynamic_sensor_prop:s0
+-
+ # Fingerprint
+ persist.vendor.goodix.dump_data             u:object_r:vendor_fingerprint_prop:s0
+ persist.vendor.sys.fp.dump_data             u:object_r:vendor_fingerprint_prop:s0

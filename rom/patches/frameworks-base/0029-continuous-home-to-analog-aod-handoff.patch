@@ -1,0 +1,144 @@
+--- a/packages/SystemUI/src/com/android/systemui/statusbar/LightRevealScrim.kt
++++ b/packages/SystemUI/src/com/android/systemui/statusbar/LightRevealScrim.kt
+@@ -50,6 +50,15 @@
+  * enters from the bottom-middle as a narrow oval, and moves upward, eventually widening to fill the
+  * screen.
+  */
++/** Uniform fade for the GTOS Home-to-analog-AOD handoff. */
++object GtosAnalogFadeReveal : LightRevealEffect {
++    override fun setRevealAmountOnScrim(amount: Float, scrim: LightRevealScrim) {
++        scrim.startColorAlpha = 1f - Interpolators.FAST_OUT_SLOW_IN.getInterpolation(amount)
++        scrim.revealGradientEndColorAlpha = 0f
++        scrim.setRevealGradientBounds(0f, 0f, scrim.width.toFloat(), scrim.height.toFloat())
++    }
++}
++
+ object LiftReveal : LightRevealEffect {
+ 
+     /** Widen the oval of light after 35%, so it will eventually fill the screen. */
+--- a/packages/SystemUI/src/com/android/systemui/statusbar/phone/UnlockedScreenOffAnimationController.kt
++++ b/packages/SystemUI/src/com/android/systemui/statusbar/phone/UnlockedScreenOffAnimationController.kt
+@@ -28,6 +28,7 @@
+ import com.android.systemui.shade.domain.interactor.ShadeLockscreenInteractor
+ import com.android.systemui.shared.Flags.ambientAod
+ import com.android.systemui.statusbar.CircleReveal
++import com.android.systemui.statusbar.GtosAnalogFadeReveal
+ import com.android.systemui.statusbar.LiftReveal
+ import com.android.systemui.statusbar.LightRevealEffect
+ import com.android.systemui.statusbar.LightRevealScrim
+@@ -84,6 +85,9 @@
+      * off animation.
+      */
+     private var initialized = false
++    private val gtosAnalog = context.resources.getBoolean(
++        com.android.systemui.res.R.bool.config_gtosGlassControls)
++
+ 
+     private lateinit var lightRevealScrim: LightRevealScrim
+     private lateinit var revealEffect: LightRevealEffect
+@@ -135,7 +139,7 @@
+                         if (dozeParameters.get().isMinModeActive()) {
+                             lightRevealScrim.revealEffect = LiftReveal
+                         } else {
+-                            lightRevealScrim.revealEffect = revealEffect
++                            lightRevealScrim.revealEffect = if (gtosAnalog) GtosAnalogFadeReveal else revealEffect
+                         }
+                         interactionJankMonitor.begin(
+                             notifShadeWindowControllerLazy.get().windowRootView,
+@@ -200,9 +204,9 @@
+         val currentY = keyguardView.y
+ 
+         // Move the keyguard up by 10% so we can animate it back down.
+-        keyguardView.y = currentY - keyguardView.height * 0.1f
+-
+-        val duration = StackStateAnimator.ANIMATION_DURATION_WAKEUP
++        keyguardView.y = if (gtosAnalog) currentY else currentY - keyguardView.height * 0.1f
++
++        val duration = if (gtosAnalog) 650 else StackStateAnimator.ANIMATION_DURATION_WAKEUP
+ 
+         // We animate the Y properly separately using the PropertyAnimator, as the panel
+         // view also needs to update the end position.
+@@ -293,7 +297,7 @@
+ 
+             shouldAnimateInKeyguard = !dozeParameters.get().isMinModeActive()
+             if (shouldAnimateInKeyguard) {
+-                lightRevealAnimator.setDuration(LIGHT_REVEAL_ANIMATION_DURATION)
++                lightRevealAnimator.setDuration(if (gtosAnalog) 700L else LIGHT_REVEAL_ANIMATION_DURATION)
+             } else {
+                 lightRevealAnimator.setDuration(LIGHT_REVEAL_ANIMATION_DURATION_MINMODE)
+             }
+@@ -321,7 +325,7 @@
+                         shadeLockscreenInteractorLazy.get().showAodUi()
+                     }
+                 },
+-                (ANIMATE_IN_KEYGUARD_DELAY * animatorDurationScale).toLong(),
++                ((if (gtosAnalog) 0L else ANIMATE_IN_KEYGUARD_DELAY) * animatorDurationScale).toLong(),
+             )
+ 
+             return true
+--- a/packages/SystemUI/src/com/android/systemui/keyguard/ui/viewmodel/GoneToAodTransitionViewModel.kt
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/ui/viewmodel/GoneToAodTransitionViewModel.kt
+@@ -16,6 +16,8 @@
+ 
+ package com.android.systemui.keyguard.ui.viewmodel
+ 
++import android.content.Context
++import com.android.systemui.dagger.qualifiers.Application
+ import com.android.app.animation.Interpolators.EMPHASIZED_DECELERATE
+ import com.android.systemui.dagger.SysUISingleton
+ import com.android.systemui.deviceentry.domain.interactor.DeviceEntryUdfpsInteractor
+@@ -41,10 +43,14 @@
+ class GoneToAodTransitionViewModel
+ @Inject
+ constructor(
++    @Application context: Context,
+     deviceEntryUdfpsInteractor: DeviceEntryUdfpsInteractor,
+     private val powerInteractor: PowerInteractor,
+     animationFlow: KeyguardTransitionAnimationFlow,
+ ) : DeviceEntryIconTransition {
++
++    private val gtosAnalog = context.resources.getBoolean(
++        com.android.systemui.res.R.bool.config_gtosGlassControls)
+ 
+     private val transitionAnimation =
+         animationFlow
+@@ -57,7 +63,7 @@
+             .sharedFlowWithState(
+                 startTime = 600.milliseconds,
+                 duration = 500.milliseconds,
+-                onStep = { translatePx + it * -translatePx },
++                onStep = { if (gtosAnalog) 0f else translatePx + it * -translatePx },
+                 onFinish = { 0f },
+                 interpolator = EMPHASIZED_DECELERATE,
+             )
+@@ -98,8 +104,10 @@
+     /** alpha animation upon entering AOD */
+     val enterFromTopAnimationAlpha: Flow<Float> =
+         transitionAnimation.sharedFlow(
+-            startTime = 700.milliseconds,
+-            duration = 400.milliseconds,
++            // GTOS shares Home's face/position: fade it in while Home fades out,
++            // instead of leaving a black gap then dropping the clock from above.
++            startTime = (if (gtosAnalog) 0 else 700).milliseconds,
++            duration = (if (gtosAnalog) 650 else 400).milliseconds,
+             onStep = { it },
+             onFinish = { 1f },
+         )
+--- a/packages/SystemUI/tests/utils/src/com/android/systemui/keyguard/ui/viewmodel/GoneToAodTransitionViewModelKosmos.kt
++++ b/packages/SystemUI/tests/utils/src/com/android/systemui/keyguard/ui/viewmodel/GoneToAodTransitionViewModelKosmos.kt
+@@ -16,6 +16,7 @@
+ 
+ package com.android.systemui.keyguard.ui.viewmodel
+ 
++import android.content.applicationContext
+ import com.android.systemui.deviceentry.domain.interactor.deviceEntryUdfpsInteractor
+ import com.android.systemui.keyguard.ui.keyguardTransitionAnimationFlow
+ import com.android.systemui.kosmos.Kosmos
+@@ -24,6 +25,7 @@
+ 
+ var Kosmos.goneToAodTransitionViewModel by Fixture {
+     GoneToAodTransitionViewModel(
++        context = applicationContext,
+         deviceEntryUdfpsInteractor = deviceEntryUdfpsInteractor,
+         powerInteractor = powerInteractor,
+         animationFlow = keyguardTransitionAnimationFlow,

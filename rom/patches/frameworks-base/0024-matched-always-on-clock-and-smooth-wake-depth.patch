@@ -1,0 +1,155 @@
+--- a/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/GtosGlassClockPainter.kt
++++ b/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/GtosGlassClockPainter.kt
+@@ -71,7 +71,7 @@
+         }
+     }
+ 
+-    fun draw(canvas: Canvas, text: String, width: Int, height: Int) {
++    fun draw(canvas: Canvas, text: String, width: Int, height: Int, dozeFraction: Float = 0f) {
+         if (width <= 0 || height <= 0 || text.isBlank()) return
+         if (lastText != text || lastWidth != width || lastHeight != height) {
+             lastText = text
+@@ -133,6 +133,10 @@
+                     (tint and 0x00ffffff) or (68 shl 24), tint and 0x00ffffff),
+                 floatArrayOf(0f, .48f, .75f, 1f), Shader.TileMode.CLAMP)
+         }
++        // Same cached silhouette in AOD; native doze interpolation smoothly changes brightness.
++        val opacity = (255f * (1f - .55f * dozeFraction.coerceIn(0f, 1f))).toInt()
++        paint.alpha = opacity
++        rimPaint.alpha = opacity
+         canvas.drawPath(ink, paint)
+         canvas.drawPath(ink, rimPaint)
+     }
+--- a/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/FlexClockTextView.kt
++++ b/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/FlexClockTextView.kt
+@@ -35,7 +35,7 @@
+ 
+     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+         super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+-        if (glassClock.enabled && !isLargeClock && dozeFraction == 0f) {
++        if (glassClock.enabled && !isLargeClock) {
+             val wantedWidth = (resources.displayMetrics.widthPixels * .88f).toInt()
+             val wantedHeight = (resources.displayMetrics.heightPixels * .345f).toInt()
+             setMeasuredDimension(resolveSize(wantedWidth, widthMeasureSpec),
+@@ -44,8 +44,8 @@
+     }
+ 
+     override fun onDraw(canvas: android.graphics.Canvas) {
+-        if (glassClock.enabled && !isLargeClock && dozeFraction == 0f) {
+-            glassClock.draw(canvas, text.toString(), width, height)
++        if (glassClock.enabled && !isLargeClock) {
++            glassClock.draw(canvas, text.toString(), width, height, dozeFraction)
+         } else super.onDraw(canvas)
+     }
+ 
+--- a/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/FlexClockViewGroup.kt
++++ b/packages/SystemUI/customization/src/com/android/systemui/shared/clocks/view/FlexClockViewGroup.kt
+@@ -68,6 +68,7 @@
+         set(value) {
+             field = value
+             childViews.forEach { view -> view.dozeFraction = field }
++            invalidate()
+         }
+ 
+     var isReactiveTouchInteractionEnabled = false
+@@ -139,7 +140,7 @@
+         val xScale = if (childViews.size < 4) 1f else 2f
+         val yBuffer = context.resources.getDimensionPixelSize(R.dimen.clock_vertical_digit_buffer)
+         val nativeSize = (maxChildSize + aodTranslate.abs()) * VPointF(xScale, 2f) + VPointF(0f, yBuffer)
+-        return if (glassClock.enabled && dozeFraction == 0f)
++        return if (glassClock.enabled)
+             VPointF(resolveSize((resources.displayMetrics.widthPixels * .88f).toInt(), widthMeasureSpec).toFloat(),
+                 resolveSize((resources.displayMetrics.heightPixels * .345f).toInt(), heightMeasureSpec).toFloat())
+             else nativeSize
+@@ -298,7 +299,7 @@
+ 
+     override fun onDraw(canvas: Canvas) {
+         logger.onDraw()
+-        if (glassClock.enabled && dozeFraction == 0f) {
++        if (glassClock.enabled) {
+             fun digit(id: Int) = childViews.firstOrNull { it.id == id }?.text?.toString().orEmpty()
+             val hours = digit(ClockViewIds.HOUR_DIGIT_PAIR).ifEmpty {
+                 digit(ClockViewIds.HOUR_FIRST_DIGIT) + digit(ClockViewIds.HOUR_SECOND_DIGIT)
+@@ -306,7 +307,7 @@
+             val minutes = digit(ClockViewIds.MINUTE_DIGIT_PAIR).ifEmpty {
+                 digit(ClockViewIds.MINUTE_FIRST_DIGIT) + digit(ClockViewIds.MINUTE_SECOND_DIGIT)
+             }
+-            glassClock.draw(canvas, "$hours:$minutes", width, height)
++            glassClock.draw(canvas, "$hours:$minutes", width, height, dozeFraction)
+             return
+         }
+         childViews.forEach { child ->
+--- a/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/layout/sections/ClockSection.kt
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/layout/sections/ClockSection.kt
+@@ -149,9 +149,8 @@
+                     )
+                 }
+             }
+-            // Apply after the native face constraints so both awake clock sizes share this layout.
+-            if (context.resources.getBoolean(R.bool.config_gtosGlassControls)
+-                    && keyguardClockViewModel.clockEventController.dozeAmount.value == 0f) {
++            // Keep the same base geometry in AOD and awake; preserve native burn-in movement.
++            if (context.resources.getBoolean(R.bool.config_gtosGlassControls)) {
+                 val metrics = context.resources.displayMetrics
+                 val side = (metrics.widthPixels * .06f).toInt()
+                 for (id in intArrayOf(ClockViewIds.LOCKSCREEN_CLOCK_VIEW_SMALL,
+@@ -163,8 +162,10 @@
+                     constrainWidth(id, ConstraintSet.MATCH_CONSTRAINT)
+                     constrainHeight(id, (metrics.heightPixels * .345f).toInt())
+                     setHorizontalBias(id, .5f)
+-                    setScaleX(id, 1f)
+-                    setScaleY(id, 1f)
++                    if (keyguardClockViewModel.clockEventController.dozeAmount.value == 0f) {
++                        setScaleX(id, 1f)
++                        setScaleY(id, 1f)
++                    }
+                 }
+                 clockInteractor.setNotificationStackDefaultTop(metrics.heightPixels * .66f)
+             }
+--- a/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/layout/sections/KeyguardSliceViewSection.kt
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/layout/sections/KeyguardSliceViewSection.kt
+@@ -124,8 +124,7 @@
+                 ConstraintSet.BOTTOM,
+             )
+ 
+-            if (context.resources.getBoolean(R.bool.config_gtosGlassControls)
+-                    && !keyguardInteractor.isDozing.value) {
++            if (context.resources.getBoolean(R.bool.config_gtosGlassControls)) {
+                 val side = (context.resources.displayMetrics.widthPixels * .06f).toInt()
+                 clear(R.id.keyguard_slice_view, ConstraintSet.TOP)
+                 connect(R.id.keyguard_slice_view, ConstraintSet.TOP, ConstraintSet.PARENT_ID,
+--- a/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/KeyguardRootView.kt
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/KeyguardRootView.kt
+@@ -67,6 +67,15 @@
+         return largest
+     }
+ 
++    private fun awakeFraction(): Float {
++        val amount = when (val view = clockView) {
++            is com.android.systemui.shared.clocks.view.FlexClockTextView -> view.dozeFraction
++            is com.android.systemui.shared.clocks.view.FlexClockViewGroup -> view.dozeFraction
++            else -> 0f
++        }
++        return 1f - amount.coerceIn(0f, 1f)
++    }
++
+     private fun drawClouds(canvas: android.graphics.Canvas, front: Boolean) {
+         val bitmap = cloud ?: return
+         val tint = context.getColor(android.R.color.system_accent1_100)
+@@ -89,7 +98,7 @@
+             val x = cx + direction * exit * (width + cw) * .8f
+             val cy = clockRect.top + clockRect.height() * if (front) .32f else .68f
+             cloudRect.set(x - cw / 2, cy - ch / 2, x + cw / 2, cy + ch / 2)
+-            cloudPaint.alpha = if (front) 100 else 40
++            cloudPaint.alpha = ((if (front) 100 else 40) * awakeFraction()).toInt()
+             canvas.drawBitmap(bitmap, null, cloudRect, cloudPaint)
+         }
+     }
+@@ -116,6 +125,7 @@
+             shader.setLocalMatrix(fogMatrix)
+             fogPaint.shader = shader
+         }
++        fogPaint.alpha = (255f * awakeFraction()).toInt()
+         canvas.drawOval(fogRect, fogPaint)
+     }
+ 

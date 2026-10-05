@@ -1,0 +1,55 @@
+--- a/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/GtosAmbientSky.kt
++++ b/packages/SystemUI/src/com/android/systemui/keyguard/ui/view/GtosAmbientSky.kt
+@@ -20,7 +20,7 @@
+     private val rect = RectF()
+     private var moonBitmap: Bitmap? = null
+     private var moonKey = ""
+-    private var minuteKey = -1L
++    private var secondKey = -1L
+     private var sun: SkyAstronomy.Body? = null
+     private var moon: SkyAstronomy.Moon? = null
+     private val stars = java.util.Random(6739L).let { random ->
+@@ -48,7 +48,7 @@
+             view.post {
+                 loading = false
+                 if (token == generation && result != null) {
+-                    state = result; minuteKey = -1L
++                    state = result; secondKey = -1L
+                     view.invalidate()
+                 }
+             }
+@@ -68,21 +68,27 @@
+         if (w <= 0 || h <= 0) return
+         val now = System.currentTimeMillis()
+         val data = state
+-        if (data != null && minuteKey != now / 60_000) {
+-            minuteKey = now / 60_000
++        if (data != null && secondKey != now / 1_000) {
++            secondKey = now / 1_000
+             sun = SkyAstronomy.sun(now, data.latitude, data.longitude)
+             moon = SkyAstronomy.moon(now, data.latitude, data.longitude)
+         }
+         val isDay = sun?.let { it.altitude > 0 } ?: (java.time.LocalTime.now().hour in 6..19)
+         val t = (SystemClock.elapsedRealtimeNanos() - (data?.epoch ?: 0L)) / 1_000_000_000.0
+         paint.reset(); paint.isAntiAlias = true
+-        val body = if (isDay) sun else moon?.position
+-        if (body != null && body.altitude > 0) {
++        val daylight = sun?.let { ((it.altitude + 6) / 12).coerceIn(0.0, 1.0).toFloat() }
++            ?: if (isDay) 1f else 0f
++        // Match the wallpaper: a daytime moon may also be above the horizon.
++        // Coordinates, projection and disc sizes remain unchanged through doze.
++        for (isMoon in listOf(false, true)) {
++            val body = if (isMoon) moon?.position else sun
++            if (body == null || body.altitude <= 0) continue
+             val x = w * (.12f + .76f * (1 - sin(body.azimuth * PI / 180).toFloat()) / 2)
+             val y = h * (.43f - body.altitude.toFloat().coerceIn(0f, 90f) / 90f * .32f)
+-            val radius = w * if (isDay) .045f else .027f
+-            val fade = (body.altitude / 3).coerceIn(0.0, 1.0).toFloat() * brightness
+-            if (isDay) {
++            val radius = w * if (isMoon) .027f else .045f
++            val visibility = if (isMoon) (1f - daylight * .82f) else daylight
++            val fade = (body.altitude / 3).coerceIn(0.0, 1.0).toFloat() * brightness * visibility
++            if (!isMoon) {
+                 // Small bounded halo, with no full-screen ambient illumination.
+                 paint.shader = RadialGradient(x, y, radius * 1.6f,
+                     intArrayOf(0x60FFE2AE, 0x00FFE2AE), null, Shader.TileMode.CLAMP)

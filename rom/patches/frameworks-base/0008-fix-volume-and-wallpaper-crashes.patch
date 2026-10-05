@@ -1,0 +1,56 @@
+--- a/packages/SystemUI/src/com/android/systemui/theme/ThemeOverlayController.java
++++ b/packages/SystemUI/src/com/android/systemui/theme/ThemeOverlayController.java
+@@ -314,7 +314,7 @@
+     private boolean isLivingSkyWallpaper(int userId) {
+         if (!mContext.getResources().getBoolean(
+                 com.android.systemui.res.R.bool.config_gtosLiveSkyColors)) return false;
+-        android.app.WallpaperInfo info = mWallpaperManager.getWallpaperInfo(userId);
++        android.app.WallpaperInfo info = mWallpaperManager.getWallpaperInfo(WallpaperManager.FLAG_SYSTEM, userId);
+         return info != null && new android.content.ComponentName("dev.gtos.launcher",
+                 "dev.gtos.launcher.design.SkyWallpaperService").equals(info.getComponent());
+     }
+--- a/packages/SystemUI/src/com/android/systemui/volume/dialog/VolumeDialog.kt
++++ b/packages/SystemUI/src/com/android/systemui/volume/dialog/VolumeDialog.kt
+@@ -126,42 +126,6 @@
+         } else {
+             setContentView(R.layout.volume_dialog_horizontal)
+         }
+-        if (isVolumeDialogVertical && context.resources.getBoolean(R.bool.config_gtosGlassControls)) {
+-            val backdrop = requireViewById<View>(R.id.volume_dialog_background)
+-            backdrop.repeatWhenAttached {
+-                coroutineScopeTraced("[Volume]glass") {
+-                    val manager = window!!.windowManager
+-                    val previous = backdrop.background
+-                    val previousForeground = backdrop.foreground
+-                    val blur = backdrop.viewRootImpl.createBackgroundBlurDrawable()
+-                    val radius = context.resources.getDimension(
+-                        R.dimen.volume_dialog_background_corner_radius)
+-                    blur.setCornerRadius(radius)
+-                    val surface = context.getColor(com.android.internal.R.color.materialColorSurface)
+-                    val listener = java.util.function.Consumer<Boolean> { enabled ->
+-                        blur.setBlurRadius(if (enabled) context.resources.getDimensionPixelSize(
+-                            R.dimen.volume_dialog_background_blur_radius) else 0)
+-                        blur.setColor(if (enabled) androidx.core.graphics.ColorUtils.setAlphaComponent(
+-                            surface, 190) else surface)
+-                    }
+-                    val rim = android.graphics.drawable.GradientDrawable(
+-                        android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
+-                        intArrayOf(0x1EFFFFFF, 0x02FFFFFF, 0x0BFFFFFF))
+-                    rim.cornerRadius = radius
+-                    rim.setStroke((context.resources.displayMetrics.density * .7f).toInt()
+-                        .coerceAtLeast(1), 0x65FFFFFF)
+-                    backdrop.background = blur
+-                    backdrop.foreground = rim
+-                    listener.accept(manager.isCrossWindowBlurEnabled)
+-                    manager.addCrossWindowBlurEnabledListener(listener)
+-                    try { awaitCancellation() } finally {
+-                        manager.removeCrossWindowBlurEnabledListener(listener)
+-                        backdrop.background = previous
+-                        backdrop.foreground = previousForeground
+-                    }
+-                }
+-            }
+-        }
+         requireViewById<View>(R.id.volume_dialog).repeatWhenAttached {
+             coroutineScopeTraced("[Volume]dialog") {
+                 val component = componentFactory.create(this)

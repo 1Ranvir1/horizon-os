@@ -1,0 +1,11 @@
+diff --git a/modules/modules.load.recovery b/modules/modules.load.recovery
+--- a/modules/modules.load.recovery
++++ b/modules/modules.load.recovery
+@@ -98,6 +98,7 @@
+ ps5169.ko
+ xhci-mtk-hcd.ko
+ mtk-pmic-wrap.ko
++mt635x-auxadc.ko
+ mt6577_auxadc.ko
+ mt6360-adc.ko
+ mt6397.ko
